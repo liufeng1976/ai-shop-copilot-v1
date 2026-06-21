@@ -6,11 +6,18 @@ export class ReviewQueue {
   #items = new Map();
 
   enqueue(input = {}) {
-    if (
-      Object.hasOwn(input, "buyerMessage") ||
-      Object.hasOwn(input, "buyer_message")
-    ) {
-      throw new TypeError("buyerMessage is forbidden in review queue");
+    const forbiddenFields = [
+      "buyerMessage",
+      "buyer_message",
+      "rawContext",
+      "raw_context",
+      "vectorContext",
+      "vector_context",
+      "llmPrompt",
+      "llm_prompt"
+    ];
+    if (forbiddenFields.some((field) => Object.hasOwn(input, field))) {
+      throw new TypeError("Sensitive context is forbidden in review queue");
     }
 
     const item = {
@@ -19,8 +26,7 @@ export class ReviewQueue {
       request_id: String(input.requestId),
       ai_reply: String(input.reply),
       confidence: Number(input.confidence),
-      status: "PENDING",
-      created_at: new Date().toISOString()
+      status: "PENDING"
     };
     this.#items.set(item.id, item);
     return structuredClone(item);

@@ -8,21 +8,8 @@ export function createAuthMiddleware(authService) {
       });
     }
 
-    request.shopId = merchant.shopId;
-    request.apiKeyId = merchant.apiKeyId;
+    request.pipelineTrace = ["authMiddleware"];
+    request.auth = merchant;
     return next();
   };
-}
-
-export function rejectShopIdOverride(request, response, next) {
-  if (
-    request.body?.shopId !== undefined ||
-    request.query?.shopId !== undefined
-  ) {
-    return response.status(403).json({
-      error: "Forbidden",
-      code: "CLIENT_SHOP_ID_FORBIDDEN"
-    });
-  }
-  return next();
 }

@@ -62,7 +62,14 @@ function publicDocument(document) {
 export class LocalVectorStore {
   #shops = new Map();
 
-  addDocument({ shopId, title, sourceType, content }) {
+  #assertTenant(shopId, resolvedShopId = shopId) {
+    if (!shopId || String(shopId) !== String(resolvedShopId)) {
+      throw new Error("Cross-shop vector access denied");
+    }
+  }
+
+  addDocument({ shopId, title, sourceType, content }, resolvedShopId = shopId) {
+    this.#assertTenant(shopId, resolvedShopId);
     if (!shopId || !title || !sourceType || !content) {
       throw new TypeError("shopId, title, sourceType and content are required");
     }
@@ -85,17 +92,20 @@ export class LocalVectorStore {
     return publicDocument(document);
   }
 
-  listDocuments(shopId) {
+  listDocuments(shopId, resolvedShopId = shopId) {
+    this.#assertTenant(shopId, resolvedShopId);
     const partition = this.#shops.get(String(shopId));
     return partition ? [...partition.values()].map(publicDocument) : [];
   }
 
-  deleteDocument(shopId, id) {
+  deleteDocument(shopId, id, resolvedShopId = shopId) {
+    this.#assertTenant(shopId, resolvedShopId);
     const partition = this.#shops.get(String(shopId));
     return partition ? partition.delete(id) : false;
   }
 
-  search(shopId, query, limit = 3) {
+  search(shopId, query, limit = 3, resolvedShopId = shopId) {
+    this.#assertTenant(shopId, resolvedShopId);
     const partition = this.#shops.get(String(shopId));
     if (!partition) return [];
     const queryVector = embed(query);

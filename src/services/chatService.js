@@ -3,6 +3,7 @@ import {
   HUMAN_HANDOFF_REPLY,
   PolicyClassifier
 } from "./policyClassifier.js";
+import { ContentSafety } from "./contentSafety.js";
 
 const DEFAULT_SHOP_CONFIG = Object.freeze({
   reviewMode: "HYBRID",
@@ -14,7 +15,7 @@ function sanitizeDraft(reply) {
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[REDACTED_EMAIL]")
     .replace(/(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)/g, "[REDACTED_PHONE]")
     .replace(
-      /\b(?:order|订单|单号)\s*(?:id|号|编号)?\s*[:：#-]?\s*[A-Z0-9-]{5,}\b/gi,
+      /\b(?:order|\u8ba2\u5355|\u5355\u53f7)\s*(?:id|\u53f7|\u7f16\u53f7)?\s*[:\uFF1A#-]?\s*[A-Z0-9-]{5,}\b/gi,
       "[REDACTED_ORDER]"
     );
 }
@@ -26,6 +27,7 @@ export class ChatService {
     reviewQueue,
     auditLogger,
     policyClassifier = new PolicyClassifier(),
+    contentSafety = new ContentSafety(),
     shopConfigs = {
       "demo-shop": { reviewMode: "MANUAL", threshold: 0.9 }
     }
@@ -35,15 +37,35 @@ export class ChatService {
     this.reviewQueue = reviewQueue;
     this.auditLogger = auditLogger;
     this.policyClassifier = policyClassifier;
+    this.contentSafety = contentSafety;
     this.shopConfigs = shopConfigs;
   }
 
-  async preview({ shopId, buyerMessage, requestId = randomUUID() }) {
+  async preview({
+    shopId,
+    buyerMessage,
+    requestId = randomUUID(),
+    preGateResult,
+    signal,
+    pipelineTrace = []
+  }) {
     const startedAt = Date.now();
     let tokenUsage = {};
     let status = "FAILED";
 
     try {
+      if (preGateResult && !preGateResult.safe) {
+        status = "NEEDS_HUMAN";
+        return {
+          requestId,
+          status,
+          reply: HUMAN_HANDOFF_REPLY,
+          confidence: 0,
+          knowledgeHit: false
+        };
+      }
+
+      pipelineTrace.push("policyClassifier");
       const policy = await this.policyClassifier.classify(buyerMessage);
       if (policy.highRisk) {
         status = "NEEDS_HUMAN";
@@ -56,13 +78,25 @@ export class ChatService {
         };
       }
 
-      const knowledge = this.vectorStore.search(shopId, buyerMessage, 3);
-      const result = await this.provider.generate({ buyerMessage, knowledge });
+      pipelineTrace.push("vectorStoreRetrieval");
+      const knowledge = this.vectorStore.search(
+        shopId,
+        buyerMessage,
+        3,
+        shopId
+      );
+      pipelineTrace.push("deepseekGeneration");
+      const result = await this.provider.generate({
+        buyerMessage,
+        knowledge,
+        signal
+      });
       tokenUsage = result.tokenUsage;
       const safeReply = sanitizeDraft(result.reply);
-      const replyPolicy = this.policyClassifier.inspectReply(safeReply);
+      pipelineTrace.push("responseSafetyPostCheck");
+      const replySafety = this.contentSafety.scanReply(safeReply);
 
-      if (result.needsHuman || !replyPolicy.safe) {
+      if (result.needsHuman || !replySafety.safe) {
         status = "NEEDS_HUMAN";
         return {
           requestId,
@@ -100,6 +134,7 @@ export class ChatService {
         knowledgeHit: false
       };
     } finally {
+      pipelineTrace.push("auditLogger");
       this.auditLogger.record({
         requestId,
         shopId,

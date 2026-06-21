@@ -30,6 +30,7 @@ export function createRateLimit({
         code: "RATE_LIMITED"
       });
     }
+    request.pipelineTrace.push("rateLimitMiddleware");
     return next();
   };
 }

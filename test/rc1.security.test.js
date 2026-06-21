@@ -68,8 +68,7 @@ test("RC1 buyerMessage is absent from audit and review queue", async () => {
     "request_id",
     "ai_reply",
     "confidence",
-    "status",
-    "created_at"
+    "status"
   ]);
 });
 
@@ -109,7 +108,7 @@ test("RC1 review queue rejects buyerMessage and stores an exact schema", () => {
         confidence: 0.9,
         buyerMessage: "forbidden"
       }),
-    /buyerMessage is forbidden/
+    /Sensitive context is forbidden/
   );
   const item = queue.enqueue({
     shopId: "demo-shop",
@@ -124,8 +123,7 @@ test("RC1 review queue rejects buyerMessage and stores an exact schema", () => {
     "request_id",
     "ai_reply",
     "confidence",
-    "status",
-    "created_at"
+    "status"
   ]);
   assert.equal(JSON.stringify(item).includes("discarded"), false);
 });

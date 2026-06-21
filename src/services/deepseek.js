@@ -36,7 +36,7 @@ function normalizeResult(payload) {
     throw new TypeError("Invalid DeepSeek JSON schema");
   }
   return {
-    reply: payload.reply,
+    reply: sanitizeModelReply(payload.reply),
     confidence: payload.confidence,
     needsHuman: payload.needs_human,
     tokenUsage: {
@@ -65,12 +65,12 @@ export class DeepSeekProvider {
     this.fetch = fetchImpl;
   }
 
-  async generate({ buyerMessage, knowledge }) {
+  async generate({ buyerMessage, knowledge, signal }) {
     if (!this.apiKey) return this.#mock(knowledge);
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       try {
-        const result = await this.#request({ buyerMessage, knowledge });
+        const result = await this.#request({ buyerMessage, knowledge, signal });
         if (result.confidence < 0.5) {
           return safeFailure("LLM_LOW_CONFIDENCE");
         }
@@ -91,7 +91,11 @@ export class DeepSeekProvider {
     return safeFailure();
   }
 
-  async #request({ buyerMessage, knowledge }) {
+  async #request({ buyerMessage, knowledge, signal }) {
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const requestSignal = signal
+      ? AbortSignal.any([timeoutSignal, signal])
+      : timeoutSignal;
     const response = await this.fetch(
       `${this.baseUrl.replace(/\/$/, "")}/chat/completions`,
       {
@@ -119,7 +123,7 @@ export class DeepSeekProvider {
             }
           ]
         }),
-        signal: AbortSignal.timeout(this.timeoutMs)
+        signal: requestSignal
       }
     );
     if (!response.ok) throw new Error(`DeepSeek request failed: ${response.status}`);
@@ -140,7 +144,7 @@ export class DeepSeekProvider {
     const best = knowledge[0];
     if (!best) return safeFailure("KNOWLEDGE_NOT_FOUND");
     return {
-      reply: `根据本店资料：${best.content}`,
+      reply: `\u6839\u636e\u672c\u5e97\u8d44\u6599\uff1a${best.content}`,
       confidence: Number(Math.min(0.99, 0.7 + best.score * 0.29).toFixed(2)),
       needsHuman: false,
       tokenUsage: emptyTokenUsage(),
@@ -151,11 +155,23 @@ export class DeepSeekProvider {
 
 function hasUnsafeCommitment(reply) {
   return [
-    /(?:refund|退款|退还).{0,20}(?:amount|元|￥|¥|\d+(?:\.\d{1,2})?)/i,
-    /(?:compensation|赔偿|补偿).{0,20}(?:元|￥|¥|\d+(?:\.\d{1,2})?|will|会|将)/i,
-    /(?:logistics|shipping|物流|快递).{0,20}(?:delivered|arrive|已到|到达|正在|预计|送达)/i,
-    /(?:order status|订单状态|订单).{0,20}(?:completed|cancelled|shipped|已完成|已取消|已发货|正在处理)/i
+    /(?:refund|\u9000\u6b3e|\u9000\u8fd8).{0,20}(?:amount|\u5143|\uFFE5|\u00A5|\d+(?:\.\d{1,2})?)/i,
+    /(?:compensation|\u8d54\u507f|\u8865\u507f).{0,20}(?:\u5143|\uFFE5|\u00A5|\d+(?:\.\d{1,2})?|will|\u4f1a|\u5c06)/i,
+    /(?:logistics|shipping|\u7269\u6d41|\u5feb\u9012).{0,20}(?:delivered|arrive|\u5df2\u5230|\u5230\u8fbe|\u6b63\u5728|\u9884\u8ba1|\u9001\u8fbe)/i,
+    /(?:order\s*status|\u8ba2\u5355\u72b6\u6001|\u8ba2\u5355).{0,20}(?:completed|cancelled|shipped|\u5df2\u5b8c\u6210|\u5df2\u53d6\u6d88|\u5df2\u53d1\u8d27|\u6b63\u5728\u5904\u7406)/i
   ].some((pattern) => pattern.test(reply));
 }
 
-export { SYSTEM_PROMPT, normalizeResult, hasUnsafeCommitment };
+function sanitizeModelReply(reply) {
+  return String(reply)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .trim()
+    .slice(0, 4000);
+}
+
+export {
+  SYSTEM_PROMPT,
+  hasUnsafeCommitment,
+  normalizeResult,
+  sanitizeModelReply
+};

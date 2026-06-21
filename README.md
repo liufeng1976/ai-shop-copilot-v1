@@ -122,7 +122,7 @@ curl -X POST http://localhost:3000/api/v1/reviews/REVIEW_ID/reject \
 ## 安全策略
 
 - 退款金额、订单状态、物流状态、赔偿、支付、改价、删除或修改订单、地址、手机号、客户姓名等请求直接返回：
-  `需要人工客服协助处理该问题。`
+  `当前问题需要人工客服协助处理`
 - 高风险请求不会调用 DeepSeek。
 - DeepSeek 请求设置超时，并最多重试 2 次。
 - 非法 JSON、字段缺失或置信度越界会安全降级为 `NEEDS_HUMAN`。
@@ -137,3 +137,26 @@ curl -X POST http://localhost:3000/api/v1/reviews/REVIEW_ID/reject \
 - Knowledge-base content is scanned before storage. Buyer messages, chat transcripts, order IDs, tracking numbers, phone numbers, addresses, payment data, customer names, logistics status, and refund transactions return `400 KB_CONTENT_REJECTED`.
 - Rejected KB content is never echoed in the response or written to audit logs.
 - DeepSeek timeout, exhausted retries, invalid JSON, schema failures, and out-of-range confidence all fail safe to human handling.
+
+## RC1.5 enforced safety pipeline
+
+Every protected API request follows one fixed chain:
+
+1. `authMiddleware`
+2. `tenantResolver`
+3. per-key and per-route rate limiting
+4. `contentSafety` pre-gate
+5. rule-first `policyClassifier`
+6. tenant-bound vector retrieval
+7. DeepSeek generation
+8. response safety post-check
+9. sanitized audit logging
+
+The chat pre-gate can stop a request before policy evaluation, vector retrieval, or
+LLM generation. Client-supplied `shopId` is rejected from body, query, and headers.
+Vector operations assert that the requested namespace matches the resolved tenant,
+and the review queue stores only `id`, `shop_id`, `request_id`, `ai_reply`,
+`confidence`, and `status`.
+
+Requests have a 10-second hard deadline. Unexpected failures return the safe
+fallback `当前问题需要人工客服协助处理` without exposing internal error details.
