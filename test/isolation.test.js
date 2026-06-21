@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import request from "supertest";
 import { createApp } from "../src/server.js";
+import { AuthService } from "../src/services/authService.js";
 import { LocalVectorStore } from "../src/services/vectorStore.js";
+
+const authService = () =>
+  new AuthService([
+    { apiKey: "key-a", shopId: "shop-a" },
+    { apiKey: "key-b", shopId: "shop-b" }
+  ]);
 
 test("different shop_id partitions never cross-search", () => {
   const store = new LocalVectorStore();
@@ -25,39 +32,65 @@ test("different shop_id partitions never cross-search", () => {
   assert.equal(results.some((document) => document.content.includes("两年保修")), false);
 });
 
-test("knowledge CRUD API keeps shop document listings isolated", async () => {
-  const app = createApp();
-  const created = await request(app)
+test("KB API cannot list or delete another tenant's documents", async () => {
+  const app = createApp({ authService: authService() });
+  const documentB = await request(app)
     .post("/api/v1/kb/documents")
+    .set("X-API-Key", "key-b")
     .send({
-      shopId: "demo-shop",
-      title: "售后政策",
+      title: "B 店政策",
       sourceType: "policy",
-      content: "本店支持签收后7天内无理由退货，商品需保持完好。"
+      content: "B 店私有资料。"
     })
     .expect(201);
 
-  await request(app)
-    .post("/api/v1/kb/documents")
-    .send({
-      shopId: "other-shop",
-      title: "其他店政策",
-      sourceType: "policy",
-      content: "其他店铺资料。"
-    })
-    .expect(201);
-
-  const demo = await request(app)
-    .get("/api/v1/kb/documents?shopId=demo-shop")
+  const listA = await request(app)
+    .get("/api/v1/kb/documents")
+    .set("X-API-Key", "key-a")
     .expect(200);
-  assert.equal(demo.body.items.length, 1);
-  assert.equal(demo.body.items[0].shopId, "demo-shop");
+  assert.equal(listA.body.items.length, 0);
 
   await request(app)
-    .delete(`/api/v1/kb/documents/${created.body.id}`)
-    .expect(204);
-  const empty = await request(app)
-    .get("/api/v1/kb/documents?shopId=demo-shop")
+    .delete(`/api/v1/kb/documents/${documentB.body.id}`)
+    .set("X-API-Key", "key-a")
+    .expect(404);
+
+  const listB = await request(app)
+    .get("/api/v1/kb/documents")
+    .set("X-API-Key", "key-b")
     .expect(200);
-  assert.equal(empty.body.items.length, 0);
+  assert.equal(listB.body.items.length, 1);
+});
+
+test("review API cannot query, approve or reject another tenant's reviews", async () => {
+  const app = createApp({ authService: authService() });
+  const review = app.locals.services.reviewQueue.enqueue({
+    requestId: "request-b",
+    shopId: "shop-b",
+    reply: "B 店草稿",
+    confidence: 0.8,
+    knowledgeRefs: []
+  });
+
+  const listA = await request(app)
+    .get("/api/v1/reviews")
+    .set("X-API-Key", "key-a")
+    .expect(200);
+  assert.equal(listA.body.items.length, 0);
+
+  await request(app)
+    .post(`/api/v1/reviews/${review.id}/approve`)
+    .set("X-API-Key", "key-a")
+    .expect(404);
+  await request(app)
+    .post(`/api/v1/reviews/${review.id}/reject`)
+    .set("X-API-Key", "key-a")
+    .expect(404);
+
+  const listB = await request(app)
+    .get("/api/v1/reviews")
+    .set("X-API-Key", "key-b")
+    .expect(200);
+  assert.equal(listB.body.items.length, 1);
+  assert.equal(listB.body.items[0].status, "PENDING");
 });

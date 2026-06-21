@@ -4,11 +4,14 @@ import request from "supertest";
 import { createApp } from "../src/server.js";
 import { LocalVectorStore } from "../src/services/vectorStore.js";
 
-function successfulProvider(confidence = 0.95) {
+const API_KEY = "demo-secret-key";
+const authenticated = (operation) => operation.set("X-API-Key", API_KEY);
+
+function successfulProvider(confidence = 0.95, reply = "本店支持七天无理由退货。") {
   return {
     async generate() {
       return {
-        reply: "本店支持七天无理由退货。",
+        reply,
         confidence,
         needsHuman: false,
         tokenUsage: {
@@ -21,16 +24,30 @@ function successfulProvider(confidence = 0.95) {
   };
 }
 
-test("buyerMessage never enters the audit log", async () => {
-  const secret = "绝密买家原文 buyer@example.com 13800138000";
-  const app = createApp({ provider: successfulProvider() });
+test("audit log contains only approved metadata and no sensitive content", async () => {
+  const buyerMessage = "绝密买家原文 buyer@example.com 13800138000";
+  const aiReply = "独特的 AI 回复正文";
+  const kbContent = "独特的静态知识库原文";
+  const vectorStore = new LocalVectorStore();
+  vectorStore.addDocument({
+    shopId: "demo-shop",
+    title: "售后政策",
+    sourceType: "policy",
+    content: kbContent
+  });
+  const app = createApp({
+    vectorStore,
+    provider: successfulProvider(0.95, aiReply)
+  });
 
-  await request(app)
-    .post("/api/v1/chat/preview")
-    .send({ shopId: "demo-shop", buyerMessage: secret, requestId: "req-privacy-1" })
-    .expect(200);
+  await authenticated(
+    request(app)
+      .post("/api/v1/chat/preview")
+      .send({ buyerMessage, requestId: "req-privacy-1" })
+  ).expect(200);
 
   const audit = app.locals.services.auditLogger.list();
+  const snapshot = JSON.stringify(audit);
   assert.equal(audit.length, 1);
   assert.deepEqual(Object.keys(audit[0]), [
     "request_id",
@@ -40,53 +57,54 @@ test("buyerMessage never enters the audit log", async () => {
     "latency_ms",
     "token_usage"
   ]);
-  assert.equal(JSON.stringify(audit).includes(secret), false);
-  assert.equal(JSON.stringify(audit).includes("buyerMessage"), false);
+  assert.equal(snapshot.includes(buyerMessage), false);
+  assert.equal(snapshot.includes(aiReply), false);
+  assert.equal(snapshot.includes(kbContent), false);
+  assert.equal(snapshot.includes("buyerMessage"), false);
+  assert.equal(snapshot.includes("reply"), false);
 });
 
-test("buyerMessage, order and customer data never enter review_queue", async () => {
+test("buyerMessage and customer transaction data never enter review_queue", async () => {
   const secret = "买家要求退货，姓名张三，电话13800138000";
-  const app = createApp({ provider: successfulProvider(0.95) });
+  const app = createApp({ provider: successfulProvider() });
 
-  await request(app)
-    .post("/api/v1/chat/preview")
-    .send({
-      shopId: "demo-shop",
+  await authenticated(
+    request(app).post("/api/v1/chat/preview").send({
       buyerMessage: secret,
       order: { id: "ORDER-PRIVATE" },
       customer: { name: "张三", phone: "13800138000" }
     })
+  )
     .expect(200)
     .expect(({ body }) => assert.equal(body.status, "PENDING_REVIEW"));
 
-  const queue = app.locals.services.reviewQueue.list({ shopId: "demo-shop" });
-  const snapshot = JSON.stringify(queue);
-  assert.equal(snapshot.includes(secret), false);
-  assert.equal(snapshot.includes("ORDER-PRIVATE"), false);
-  assert.equal(snapshot.includes("张三"), false);
-  assert.equal(snapshot.includes("13800138000"), false);
-  assert.equal(snapshot.includes("buyerMessage"), false);
+  const snapshot = JSON.stringify(
+    app.locals.services.reviewQueue.list({ shopId: "demo-shop" })
+  );
+  for (const forbidden of [
+    secret,
+    "ORDER-PRIVATE",
+    "张三",
+    "13800138000",
+    "buyerMessage"
+  ]) {
+    assert.equal(snapshot.includes(forbidden), false);
+  }
 });
 
 test("a model cannot smuggle buyer PII into review_queue", async () => {
   const app = createApp({
-    provider: {
-      async generate() {
-        return {
-          reply:
-            "请联系 buyer@example.com 或 13800138000，并核对订单号 ORDER-PRIVATE-123。",
-          confidence: 0.99,
-          needsHuman: false,
-          tokenUsage: {}
-        };
-      }
-    }
+    provider: successfulProvider(
+      0.99,
+      "请联系 buyer@example.com 或 13800138000，并核对订单号 ORDER-PRIVATE-123。"
+    )
   });
 
-  await request(app)
-    .post("/api/v1/chat/preview")
-    .send({ shopId: "demo-shop", buyerMessage: "我的售后怎么办？" })
-    .expect(200);
+  await authenticated(
+    request(app)
+      .post("/api/v1/chat/preview")
+      .send({ buyerMessage: "我的售后怎么办？" })
+  ).expect(200);
 
   const snapshot = JSON.stringify(
     app.locals.services.reviewQueue.list({ shopId: "demo-shop" })

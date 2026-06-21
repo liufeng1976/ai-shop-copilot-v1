@@ -36,17 +36,17 @@ export class ReviewQueue {
     return item ? structuredClone(item) : null;
   }
 
-  approve(id) {
-    return this.#transition(id, "APPROVED");
+  approve(shopId, id) {
+    return this.#transition(shopId, id, "APPROVED");
   }
 
-  reject(id) {
-    return this.#transition(id, "REJECTED");
+  reject(shopId, id) {
+    return this.#transition(shopId, id, "REJECTED");
   }
 
-  #transition(id, status) {
+  #transition(shopId, id, status) {
     const item = this.#items.get(id);
-    if (!item) return null;
+    if (!item || item.shopId !== String(shopId)) return null;
     if (item.status !== "PENDING") {
       throw new TypeError("Only pending reviews can be changed");
     }

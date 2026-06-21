@@ -87,11 +87,9 @@ export class LocalVectorStore {
     return partition ? [...partition.values()].map(publicDocument) : [];
   }
 
-  deleteDocument(id) {
-    for (const partition of this.#shops.values()) {
-      if (partition.delete(id)) return true;
-    }
-    return false;
+  deleteDocument(shopId, id) {
+    const partition = this.#shops.get(String(shopId));
+    return partition ? partition.delete(id) : false;
   }
 
   search(shopId, query, limit = 3) {

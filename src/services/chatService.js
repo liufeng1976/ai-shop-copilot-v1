@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-
-const HIGH_RISK_PATTERN =
-  /退款金额|退多少钱|订单状态|订单到哪|物流状态|物流到哪|赔偿|补偿|支付|付款|改价|修改价格|删除订单|取消订单|修改订单/i;
+import {
+  HUMAN_HANDOFF_REPLY,
+  PolicyClassifier
+} from "./policyClassifier.js";
 
 const DEFAULT_SHOP_CONFIG = Object.freeze({
   reviewMode: "HYBRID",
@@ -24,6 +25,7 @@ export class ChatService {
     provider,
     reviewQueue,
     auditLogger,
+    policyClassifier = new PolicyClassifier(),
     shopConfigs = {
       "demo-shop": { reviewMode: "MANUAL", threshold: 0.9 }
     }
@@ -32,6 +34,7 @@ export class ChatService {
     this.provider = provider;
     this.reviewQueue = reviewQueue;
     this.auditLogger = auditLogger;
+    this.policyClassifier = policyClassifier;
     this.shopConfigs = shopConfigs;
   }
 
@@ -39,14 +42,17 @@ export class ChatService {
     const startedAt = Date.now();
     let tokenUsage = {};
     let status = "FAILED";
+    let errorCode;
 
     try {
-      if (HIGH_RISK_PATTERN.test(buyerMessage)) {
+      const policy = await this.policyClassifier.classify(buyerMessage);
+      if (policy.highRisk) {
         status = "NEEDS_HUMAN";
+        errorCode = `POLICY_${policy.code}`;
         return {
           requestId,
           status,
-          reply: "该问题涉及高风险业务操作，请转人工客服处理。",
+          reply: HUMAN_HANDOFF_REPLY,
           confidence: 0,
           knowledgeHit: false
         };
@@ -55,11 +61,23 @@ export class ChatService {
       const knowledge = this.vectorStore.search(shopId, buyerMessage, 3);
       const result = await this.provider.generate({ buyerMessage, knowledge });
       tokenUsage = result.tokenUsage;
+      errorCode = result.errorCode ?? undefined;
       const safeReply = sanitizeDraft(result.reply);
-      status = result.needsHuman
-        ? "NEEDS_HUMAN"
-        : this.#route(shopId, result.confidence);
+      const replyPolicy = this.policyClassifier.inspectReply(safeReply);
 
+      if (result.needsHuman || !replyPolicy.safe) {
+        status = "NEEDS_HUMAN";
+        errorCode = replyPolicy.code ?? errorCode;
+        return {
+          requestId,
+          status,
+          reply: HUMAN_HANDOFF_REPLY,
+          confidence: 0,
+          knowledgeHit: knowledge.length > 0
+        };
+      }
+
+      status = this.#route(shopId, result.confidence);
       if (status === "PENDING_REVIEW") {
         this.reviewQueue.enqueue({
           requestId,
@@ -79,10 +97,11 @@ export class ChatService {
       };
     } catch {
       status = "NEEDS_HUMAN";
+      errorCode = "CHAT_SERVICE_FAILURE";
       return {
         requestId,
         status,
-        reply: "AI 回复生成失败，请转人工客服处理。",
+        reply: HUMAN_HANDOFF_REPLY,
         confidence: 0,
         knowledgeHit: false
       };
@@ -93,7 +112,8 @@ export class ChatService {
         action: "CHAT_PREVIEW",
         status,
         latencyMs: Date.now() - startedAt,
-        tokenUsage
+        tokenUsage,
+        errorCode
       });
     }
   }
@@ -106,4 +126,4 @@ export class ChatService {
   }
 }
 
-export { HIGH_RISK_PATTERN, sanitizeDraft };
+export { sanitizeDraft };
