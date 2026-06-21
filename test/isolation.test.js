@@ -2,31 +2,40 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import request from "supertest";
 import { createApp } from "../src/server.js";
-import { AuthService } from "../src/services/authService.js";
+import {
+  AuthService,
+  createAuthenticatedTenantContext
+} from "../src/services/authService.js";
 import { LocalVectorStore } from "../src/services/vectorStore.js";
+import { ContentSafety } from "../src/services/contentSafety.js";
 
 const authService = () =>
   new AuthService([
     { apiKey: "key-a", shopId: "shop-a" },
     { apiKey: "key-b", shopId: "shop-b" }
   ]);
+const tenant = (shopId) =>
+  createAuthenticatedTenantContext({
+    shopId,
+    apiKeyId: `test-hash-${shopId}`
+  });
 
 test("different shop_id partitions never cross-search", () => {
   const store = new LocalVectorStore();
-  store.addDocument({
-    shopId: "shop-a",
+  const shopA = tenant("shop-a");
+  const shopB = tenant("shop-b");
+  store.addDocument(shopA, {
     title: "A 店退货",
     sourceType: "policy",
     content: "A 店支持七天退货。"
   });
-  store.addDocument({
-    shopId: "shop-b",
+  store.addDocument(shopB, {
     title: "B 店保修",
     sourceType: "policy",
     content: "B 店提供两年保修。"
   });
 
-  const results = store.search("shop-a", "两年保修 退货", 10);
+  const results = store.search(shopA, "两年保修 退货", 10);
   assert.equal(results.length, 1);
   assert.equal(results[0].shopId, "shop-a");
   assert.equal(results.some((document) => document.content.includes("两年保修")), false);
@@ -67,7 +76,10 @@ test("review API cannot query, approve or reject another tenant's reviews", asyn
   const review = app.locals.services.reviewQueue.enqueue({
     requestId: "request-b",
     shopId: "shop-b",
-    reply: "B 店草稿",
+    reviewSafety: new ContentSafety().sanitizeReviewReply(
+      "B 店草稿",
+      "unrelated buyer question"
+    ),
     confidence: 0.8
   });
 

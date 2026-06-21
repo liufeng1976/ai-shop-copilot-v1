@@ -42,19 +42,20 @@ export class ChatService {
   }
 
   async preview({
-    shopId,
+    tenantContext,
     buyerMessage,
     requestId = randomUUID(),
-    preGateResult,
     signal,
     pipelineTrace = []
   }) {
+    const shopId = tenantContext?.shopId ?? "";
     const startedAt = Date.now();
     let tokenUsage = {};
     let status = "FAILED";
 
     try {
-      if (preGateResult && !preGateResult.safe) {
+      const internalPreGate = this.contentSafety.preGate(buyerMessage);
+      if (!internalPreGate.safe) {
         status = "NEEDS_HUMAN";
         return {
           requestId,
@@ -80,10 +81,9 @@ export class ChatService {
 
       pipelineTrace.push("vectorStoreRetrieval");
       const knowledge = this.vectorStore.search(
-        shopId,
+        tenantContext,
         buyerMessage,
-        3,
-        shopId
+        3
       );
       pipelineTrace.push("deepseekGeneration");
       const result = await this.provider.generate({
@@ -109,10 +109,14 @@ export class ChatService {
 
       status = this.#route(shopId, result.confidence);
       if (status === "PENDING_REVIEW") {
+        const reviewSafeReply = this.contentSafety.sanitizeReviewReply(
+          safeReply,
+          buyerMessage
+        );
         this.reviewQueue.enqueue({
           requestId,
           shopId,
-          reply: safeReply,
+          reviewSafety: reviewSafeReply,
           confidence: result.confidence
         });
       }

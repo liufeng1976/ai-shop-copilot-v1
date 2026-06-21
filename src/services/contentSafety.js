@@ -29,6 +29,20 @@ const REPLY_RULES = Object.freeze([
   ["COMPENSATION_PROMISE", /(?:compensation|\u8d54\u507f|\u8865\u507f).{0,20}(?:will|\u4f1a|\u5c06|\u5143|\uFFE5|\u00A5|\d+(?:\.\d{1,2})?)/i]
 ]);
 
+const REVIEW_SENSITIVE_RULES = Object.freeze([
+  ["ORDER_ID", /(?:order\s*(?:id|number)|\u8ba2\u5355\u53f7|\u8ba2\u5355\u7f16\u53f7)\s*[:\uFF1A#-]?\s*[a-z0-9-]{4,}/i],
+  ["TRACKING_NUMBER", /(?:tracking\s*(?:id|number)|\u7269\u6d41\u5355\u53f7|\u5feb\u9012\u5355\u53f7|\u8fd0\u5355\u53f7)\s*[:\uFF1A#-]?\s*[a-z0-9-]{6,}/i],
+  ["PHONE", /(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)|phone\s*[:\uFF1A]?\s*\+?[\d\s().-]{7,}/i],
+  ["ADDRESS", /(?:\u6536\u8d27\u5730\u5740|\u5ba2\u6237\u5730\u5740|\u4e70\u5bb6\u5730\u5740|shipping\s*address|customer\s*address)\s*[:\uFF1A]?/i],
+  ["PAYMENT", /\bpayment\b|\u652f\u4ed8\u6d41\u6c34|\u652f\u4ed8\u5355\u53f7/i],
+  ["CUSTOMER_IDENTITY", /(?:\u5ba2\u6237\u59d3\u540d|\u4e70\u5bb6\u59d3\u540d|\u6536\u4ef6\u4eba\u59d3\u540d|customer\s*name)\s*[:\uFF1A]?/i],
+  ["LOGISTICS_STATUS", /\u7269\u6d41\u72b6\u6001|\u5feb\u9012\u72b6\u6001|shipping\s*status|logistics\s*status/i]
+]);
+const REVIEW_SAFE_RESULTS = new WeakSet();
+
+export const REVIEW_REWRITE_REQUIRED =
+  "\u8be5\u56de\u590d\u9700\u8981\u4eba\u5de5\u5ba2\u670d\u91cd\u65b0\u7f16\u8f91\u3002";
+
 function evaluate(value, rules, emptyIsUnsafe = false) {
   if (typeof value !== "string" || !value.trim()) {
     return {
@@ -40,6 +54,36 @@ function evaluate(value, rules, emptyIsUnsafe = false) {
   return matched
     ? { safe: false, code: matched[0] }
     : { safe: true, code: null };
+}
+
+function normalizeForEcho(value) {
+  return String(value)
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function containsUserEcho(reply, buyerMessage) {
+  const normalizedReply = normalizeForEcho(reply);
+  const normalizedMessage = normalizeForEcho(buyerMessage);
+  if (normalizedMessage.length < 6) return false;
+  if (normalizedReply.includes(normalizedMessage)) return true;
+
+  const fragmentLength = Math.min(24, Math.max(8, Math.floor(normalizedMessage.length * 0.6)));
+  for (
+    let index = 0;
+    index + fragmentLength <= normalizedMessage.length;
+    index += Math.max(1, Math.floor(fragmentLength / 2))
+  ) {
+    if (
+      normalizedReply.includes(
+        normalizedMessage.slice(index, index + fragmentLength)
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export class ContentSafety {
@@ -55,9 +99,42 @@ export class ContentSafety {
     return evaluate(message, INPUT_RULES);
   }
 
+  preGate(message) {
+    return this.scanInput(message);
+  }
+
   scanReply(reply) {
     return evaluate(reply, REPLY_RULES);
   }
+
+  scanReplyForUserEcho(reply, buyerMessage) {
+    if (containsUserEcho(reply, buyerMessage)) {
+      return { safe: false, code: "USER_MESSAGE_ECHO" };
+    }
+    return evaluate(reply, REVIEW_SENSITIVE_RULES);
+  }
+
+  sanitizeReviewReply(reply, buyerMessage) {
+    const result = this.scanReplyForUserEcho(reply, buyerMessage);
+    const reviewSafeResult = Object.freeze(result.safe
+      ? { ...result, reply }
+      : { ...result, reply: REVIEW_REWRITE_REQUIRED });
+    REVIEW_SAFE_RESULTS.add(reviewSafeResult);
+    return reviewSafeResult;
+  }
 }
 
-export { INPUT_RULES, KNOWLEDGE_RULES, REPLY_RULES };
+export function isReviewSafeResult(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    REVIEW_SAFE_RESULTS.has(value)
+  );
+}
+
+export {
+  INPUT_RULES,
+  KNOWLEDGE_RULES,
+  REPLY_RULES,
+  REVIEW_SENSITIVE_RULES
+};

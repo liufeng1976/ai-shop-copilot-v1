@@ -1,3 +1,5 @@
+import { createAuthenticatedTenantContext } from "../services/authService.js";
+
 const CLIENT_SHOP_HEADERS = ["x-shop-id", "shop-id", "shopid"];
 
 export function createTenantResolver() {
@@ -24,8 +26,9 @@ export function createTenantResolver() {
       });
     }
 
-    request.shopId = resolvedShopId;
-    request.apiKeyId = request.auth.apiKeyId;
+    request.tenantContext = createAuthenticatedTenantContext(request.auth);
+    request.shopId = request.tenantContext.shopId;
+    request.apiKeyId = request.tenantContext.apiKeyHash;
     request.pipelineTrace.push("tenantResolver");
     return next();
   };

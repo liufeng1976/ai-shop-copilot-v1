@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isAuthenticatedTenantContext } from "./authService.js";
 
 const VECTOR_SIZE = 256;
 const ALLOWED_SOURCE_TYPES = new Set(["faq", "policy", "tone"]);
@@ -62,16 +63,27 @@ function publicDocument(document) {
 export class LocalVectorStore {
   #shops = new Map();
 
-  #assertTenant(shopId, resolvedShopId = shopId) {
-    if (!shopId || String(shopId) !== String(resolvedShopId)) {
-      throw new Error("Cross-shop vector access denied");
+  #assertTenant(tenantContext, expectedShopId) {
+    if (
+      !tenantContext ||
+      typeof tenantContext !== "object" ||
+      !isAuthenticatedTenantContext(tenantContext) ||
+      tenantContext.resolvedBy !== "auth" ||
+      !tenantContext.apiKeyHash ||
+      !tenantContext.tenantId ||
+      !tenantContext.shopId ||
+      (expectedShopId !== undefined &&
+        String(tenantContext.shopId) !== String(expectedShopId))
+    ) {
+      throw new ForbiddenTenantAccessError();
     }
+    return String(tenantContext.shopId);
   }
 
-  addDocument({ shopId, title, sourceType, content }, resolvedShopId = shopId) {
-    this.#assertTenant(shopId, resolvedShopId);
-    if (!shopId || !title || !sourceType || !content) {
-      throw new TypeError("shopId, title, sourceType and content are required");
+  addDocument(tenantContext, { title, sourceType, content, shopId } = {}) {
+    const tenantShopId = this.#assertTenant(tenantContext, shopId);
+    if (!title || !sourceType || !content) {
+      throw new TypeError("title, sourceType and content are required");
     }
     if (FORBIDDEN_SOURCE_TYPES.has(sourceType) || !ALLOWED_SOURCE_TYPES.has(sourceType)) {
       throw new TypeError(`sourceType is not allowed: ${sourceType}`);
@@ -79,7 +91,7 @@ export class LocalVectorStore {
 
     const document = {
       id: randomUUID(),
-      shopId: String(shopId),
+      shopId: tenantShopId,
       title: String(title),
       sourceType,
       content: String(content),
@@ -92,21 +104,21 @@ export class LocalVectorStore {
     return publicDocument(document);
   }
 
-  listDocuments(shopId, resolvedShopId = shopId) {
-    this.#assertTenant(shopId, resolvedShopId);
-    const partition = this.#shops.get(String(shopId));
+  listDocuments(tenantContext, shopId) {
+    const tenantShopId = this.#assertTenant(tenantContext, shopId);
+    const partition = this.#shops.get(tenantShopId);
     return partition ? [...partition.values()].map(publicDocument) : [];
   }
 
-  deleteDocument(shopId, id, resolvedShopId = shopId) {
-    this.#assertTenant(shopId, resolvedShopId);
-    const partition = this.#shops.get(String(shopId));
+  deleteDocument(tenantContext, id, shopId) {
+    const tenantShopId = this.#assertTenant(tenantContext, shopId);
+    const partition = this.#shops.get(tenantShopId);
     return partition ? partition.delete(id) : false;
   }
 
-  search(shopId, query, limit = 3, resolvedShopId = shopId) {
-    this.#assertTenant(shopId, resolvedShopId);
-    const partition = this.#shops.get(String(shopId));
+  search(tenantContext, query, limit = 3, shopId) {
+    const tenantShopId = this.#assertTenant(tenantContext, shopId);
+    const partition = this.#shops.get(tenantShopId);
     if (!partition) return [];
     const queryVector = embed(query);
     return [...partition.values()]
@@ -117,6 +129,14 @@ export class LocalVectorStore {
       .filter((document) => document.score > 0)
       .sort((left, right) => right.score - left.score)
       .slice(0, limit);
+  }
+}
+
+export class ForbiddenTenantAccessError extends Error {
+  constructor() {
+    super("Forbidden tenant access");
+    this.name = "ForbiddenTenantAccessError";
+    this.code = "FORBIDDEN_TENANT_ACCESS";
   }
 }
 

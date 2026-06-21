@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isReviewSafeResult } from "./contentSafety.js";
 
 const VALID_STATUSES = new Set(["PENDING", "APPROVED", "REJECTED"]);
 
@@ -19,12 +20,15 @@ export class ReviewQueue {
     if (forbiddenFields.some((field) => Object.hasOwn(input, field))) {
       throw new TypeError("Sensitive context is forbidden in review queue");
     }
+    if (!isReviewSafeResult(input.reviewSafety)) {
+      throw new TypeError("Verified review-safe reply is required");
+    }
 
     const item = {
       id: randomUUID(),
       shop_id: String(input.shopId),
       request_id: String(input.requestId),
-      ai_reply: String(input.reply),
+      ai_reply: input.reviewSafety.reply,
       confidence: Number(input.confidence),
       status: "PENDING"
     };

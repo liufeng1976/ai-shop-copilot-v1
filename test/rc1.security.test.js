@@ -2,15 +2,24 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import request from "supertest";
 import { createApp } from "../src/server.js";
-import { AuthService } from "../src/services/authService.js";
+import {
+  AuthService,
+  createAuthenticatedTenantContext
+} from "../src/services/authService.js";
 import { DeepSeekProvider } from "../src/services/deepseek.js";
 import { createRateLimit } from "../src/middleware/rateLimit.js";
 import { HUMAN_HANDOFF_REPLY } from "../src/services/policyClassifier.js";
 import { AuditLogger } from "../src/services/auditLogger.js";
 import { ReviewQueue } from "../src/services/reviewQueue.js";
 import { LocalVectorStore } from "../src/services/vectorStore.js";
+import { ContentSafety } from "../src/services/contentSafety.js";
 
 const API_KEY = "demo-secret-key";
+const demoTenant = () =>
+  createAuthenticatedTenantContext({
+    shopId: "demo-shop",
+    apiKeyId: "test-demo-hash"
+  });
 
 function auth(operation, apiKey = API_KEY) {
   return operation.set("X-API-Key", apiKey);
@@ -113,7 +122,10 @@ test("RC1 review queue rejects buyerMessage and stores an exact schema", () => {
   const item = queue.enqueue({
     shopId: "demo-shop",
     requestId: "request-id",
-    reply: "safe",
+    reviewSafety: new ContentSafety().sanitizeReviewReply(
+      "safe",
+      "unrelated buyer question"
+    ),
     confidence: 0.9,
     extraText: "discarded"
   });
@@ -132,8 +144,7 @@ test("RC1 vector store only accepts faq, policy and tone", () => {
   const store = new LocalVectorStore();
   for (const sourceType of ["faq", "policy", "tone"]) {
     assert.doesNotThrow(() =>
-      store.addDocument({
-        shopId: "demo-shop",
+      store.addDocument(demoTenant(), {
         title: sourceType,
         sourceType,
         content: "static merchant content"
@@ -142,8 +153,7 @@ test("RC1 vector store only accepts faq, policy and tone", () => {
   }
   for (const sourceType of ["product", "script", "buyer_message", "customer"]) {
     assert.throws(() =>
-      store.addDocument({
-        shopId: "demo-shop",
+      store.addDocument(demoTenant(), {
         title: sourceType,
         sourceType,
         content: "forbidden"

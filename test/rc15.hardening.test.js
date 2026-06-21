@@ -9,10 +9,17 @@ import { ReviewQueue } from "../src/services/reviewQueue.js";
 import { LocalVectorStore } from "../src/services/vectorStore.js";
 import { createRequestTimeout } from "../src/middleware/requestTimeout.js";
 import { HUMAN_HANDOFF_REPLY } from "../src/services/policyClassifier.js";
+import { createAuthenticatedTenantContext } from "../src/services/authService.js";
+import { ContentSafety } from "../src/services/contentSafety.js";
 
 const API_KEY = "demo-secret-key";
 const authenticated = (operation) =>
   operation.set("X-API-Key", API_KEY);
+const tenant = (shopId) =>
+  createAuthenticatedTenantContext({
+    shopId,
+    apiKeyId: `test-hash-${shopId}`
+  });
 
 function safeProvider({ reply = "Static FAQ answer", confidence = 0.95 } = {}) {
   return {
@@ -99,7 +106,10 @@ test("RC1.5 review queue stores only the six allowed fields", () => {
   const item = queue.enqueue({
     shopId: "demo-shop",
     requestId: "request-id",
-    reply: "safe reply",
+    reviewSafety: new ContentSafety().sanitizeReviewReply(
+      "safe reply",
+      "unrelated buyer question"
+    ),
     confidence: 0.9
   });
   assert.deepEqual(Object.keys(item), [
@@ -114,24 +124,37 @@ test("RC1.5 review queue stores only the six allowed fields", () => {
 
 test("RC1.5 vectorStore throws on cross-shop namespace access", () => {
   const store = new LocalVectorStore();
+  const shopA = tenant("shop-a");
   store.addDocument(
+    shopA,
     {
-      shopId: "shop-a",
       title: "FAQ",
       sourceType: "faq",
       content: "Static FAQ for shop A"
-    },
-    "shop-a"
+    }
   );
 
   assert.throws(
-    () => store.search("shop-a", "FAQ", 3, "shop-b"),
-    /Cross-shop vector access denied/
+    () => store.search("shop-a", "FAQ"),
+    /Forbidden tenant access/
   );
   assert.throws(
-    () => store.listDocuments("shop-a", "shop-b"),
-    /Cross-shop vector access denied/
+    () => store.search(
+      {
+        shopId: "shop-a",
+        tenantId: "shop-a",
+        apiKeyHash: "fake",
+        resolvedBy: "auth"
+      },
+      "FAQ"
+    ),
+    /Forbidden tenant access/
   );
+  assert.throws(
+    () => store.listDocuments(shopA, "shop-b"),
+    /Forbidden tenant access/
+  );
+  assert.equal(store.search(shopA, "FAQ").length, 1);
 });
 
 test("RC1.5 policyClassifier blocks high-risk input without LLM", async () => {

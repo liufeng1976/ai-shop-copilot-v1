@@ -13,7 +13,7 @@ export function createContentSafetyGate(contentSafety) {
     }
 
     if (request.method === "POST" && request.path === "/chat/preview") {
-      request.preGateResult = contentSafety.scanInput(request.body?.buyerMessage);
+      request.preGateTelemetry = contentSafety.preGate(request.body?.buyerMessage);
     }
     return next();
   };

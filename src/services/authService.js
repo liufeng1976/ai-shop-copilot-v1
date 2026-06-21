@@ -3,6 +3,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 const DEFAULT_MERCHANTS = Object.freeze([
   Object.freeze({ apiKey: "demo-secret-key", shopId: "demo-shop" })
 ]);
+const AUTHENTICATED_TENANT_CONTEXTS = new WeakSet();
 
 function hashSecret(value) {
   return createHash("sha256").update(String(value)).digest();
@@ -41,6 +42,28 @@ export class AuthService {
         }
       : null;
   }
+}
+
+export function createAuthenticatedTenantContext({ shopId, apiKeyId }) {
+  if (!shopId || !apiKeyId) {
+    throw new TypeError("Authenticated merchant identity is required");
+  }
+  const tenantContext = Object.freeze({
+    shopId: String(shopId),
+    tenantId: String(shopId),
+    apiKeyHash: String(apiKeyId),
+    resolvedBy: "auth"
+  });
+  AUTHENTICATED_TENANT_CONTEXTS.add(tenantContext);
+  return tenantContext;
+}
+
+export function isAuthenticatedTenantContext(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    AUTHENTICATED_TENANT_CONTEXTS.has(value)
+  );
 }
 
 export { DEFAULT_MERCHANTS, secretsEqual };

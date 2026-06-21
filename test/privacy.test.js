@@ -3,9 +3,15 @@ import { test } from "node:test";
 import request from "supertest";
 import { createApp } from "../src/server.js";
 import { LocalVectorStore } from "../src/services/vectorStore.js";
+import { createAuthenticatedTenantContext } from "../src/services/authService.js";
 
 const API_KEY = "demo-secret-key";
 const authenticated = (operation) => operation.set("X-API-Key", API_KEY);
+const demoTenant = () =>
+  createAuthenticatedTenantContext({
+    shopId: "demo-shop",
+    apiKeyId: "test-demo-hash"
+  });
 
 function successfulProvider(confidence = 0.95, reply = "本店支持七天无理由退货。") {
   return {
@@ -29,8 +35,7 @@ test("audit log contains only approved metadata and no sensitive content", async
   const aiReply = "独特的 AI 回复正文";
   const kbContent = "独特的静态知识库原文";
   const vectorStore = new LocalVectorStore();
-  vectorStore.addDocument({
-    shopId: "demo-shop",
+  vectorStore.addDocument(demoTenant(), {
     title: "售后政策",
     sourceType: "policy",
     content: kbContent
@@ -125,8 +130,7 @@ test("Vector KB rejects private or transactional source types", () => {
   ]) {
     assert.throws(
       () =>
-        vectorStore.addDocument({
-          shopId: "demo-shop",
+        vectorStore.addDocument(demoTenant(), {
           title: "禁止文档",
           sourceType,
           content: "不得保存"

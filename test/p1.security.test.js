@@ -3,13 +3,20 @@ import { test } from "node:test";
 import request from "supertest";
 import { createApp } from "../src/server.js";
 import { AuthService } from "../src/services/authService.js";
+import { createAuthenticatedTenantContext } from "../src/services/authService.js";
 import { DeepSeekProvider } from "../src/services/deepseek.js";
 import { ReviewQueue } from "../src/services/reviewQueue.js";
 import { HUMAN_HANDOFF_REPLY } from "../src/services/policyClassifier.js";
+import { ContentSafety } from "../src/services/contentSafety.js";
 
 const API_KEY = "demo-secret-key";
 const withAuth = (operation, apiKey = API_KEY) =>
   operation.set("X-API-Key", apiKey);
+const demoTenant = () =>
+  createAuthenticatedTenantContext({
+    shopId: "demo-shop",
+    apiKeyId: "test-demo-hash"
+  });
 
 function validResponse(content = {}) {
   return {
@@ -57,7 +64,7 @@ test("P1 rejects private or transactional KB content without echoing it", async 
     assert.equal(response.body.code, "KB_CONTENT_REJECTED");
     assert.equal(JSON.stringify(response.body).includes(content), false);
     assert.equal(
-      app.locals.services.vectorStore.listDocuments("demo-shop").length,
+      app.locals.services.vectorStore.listDocuments(demoTenant()).length,
       0
     );
   }
@@ -190,7 +197,10 @@ test("P1 tenant B cannot approve or reject tenant A review", async () => {
   const item = reviewQueue.enqueue({
     shopId: "shop-a",
     requestId: "request-a",
-    reply: "safe draft",
+    reviewSafety: new ContentSafety().sanitizeReviewReply(
+      "safe draft",
+      "unrelated buyer question"
+    ),
     confidence: 0.8
   });
   const app = createApp({ authService, reviewQueue });

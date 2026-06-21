@@ -110,10 +110,10 @@ export function createApp({
 
   api.post("/kb/documents", (request, response, next) => {
     try {
-      const document = vectorStore.addDocument({
+      const document = vectorStore.addDocument(request.tenantContext, {
         ...request.body,
         shopId: request.shopId
-      }, request.shopId);
+      });
       response.status(201).json(document);
     } catch (error) {
       next(error);
@@ -122,15 +122,14 @@ export function createApp({
 
   api.get("/kb/documents", (request, response) => {
     return response.json({
-      items: vectorStore.listDocuments(request.shopId, request.shopId)
+      items: vectorStore.listDocuments(request.tenantContext)
     });
   });
 
   api.delete("/kb/documents/:id", (request, response) => {
     if (!vectorStore.deleteDocument(
-      request.shopId,
-      request.params.id,
-      request.shopId
+      request.tenantContext,
+      request.params.id
     )) {
       return response.status(404).json({ error: "Document not found" });
     }
@@ -148,10 +147,9 @@ export function createApp({
       }
       const result = await Promise.race([
         chatService.preview({
-          shopId: request.shopId,
+          tenantContext: request.tenantContext,
           buyerMessage,
           requestId,
-          preGateResult: request.preGateResult,
           signal: request.abortSignal,
           pipelineTrace: request.pipelineTrace
         }),
