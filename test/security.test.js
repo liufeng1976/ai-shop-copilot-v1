@@ -35,7 +35,7 @@ test("body or query shopId mismatch returns 403", async () => {
     .expect(403);
 });
 
-test("matching optional shopId is accepted but tenant still comes from API key", async () => {
+test("matching client shopId is also rejected", async () => {
   const app = createApp();
   const response = await request(app)
     .post("/api/v1/kb/documents")
@@ -44,10 +44,10 @@ test("matching optional shopId is accepted but tenant still comes from API key",
       shopId: "demo-shop",
       title: "FAQ",
       sourceType: "faq",
-      content: "静态商家文档"
+      content: "Static merchant document"
     })
-    .expect(201);
-  assert.equal(response.body.shopId, "demo-shop");
+    .expect(403);
+  assert.equal(response.body.code, "CLIENT_SHOP_ID_FORBIDDEN");
 });
 
 test("rate limit is enforced per apiKey and route", async () => {

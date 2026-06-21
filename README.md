@@ -36,7 +36,7 @@ threshold = 0.9
 X-API-Key: demo-secret-key
 ```
 
-如果请求 body 或 query 中包含 `shopId`，它必须与 API Key 绑定的店铺一致，否则返回 `403`。服务端始终使用 API Key 解析出的 `shopId` 访问知识库和审核队列。
+Client-provided `shopId` is forbidden in every `/api/v1` body and query. Tenant identity comes only from `X-API-Key`.
 
 ## 启动
 
@@ -128,3 +128,12 @@ curl -X POST http://localhost:3000/api/v1/reviews/REVIEW_ID/reject \
 - 非法 JSON、字段缺失或置信度越界会安全降级为 `NEEDS_HUMAN`。
 - 模型回复若包含退款、赔偿、物流或订单状态承诺，也会强制转人工。
 - LLM classifier 仅预留接口，RC1 默认关闭。
+
+
+## RC1 P1 production safeguards
+
+- `demo-secret-key` is for local development only. If `NODE_ENV=production` and the demo key remains configured, application startup fails immediately.
+- Clients must never send `shopId` in request bodies or query strings, even when it matches the API key tenant. Any client-provided `shopId` returns `403 CLIENT_SHOP_ID_FORBIDDEN`.
+- Knowledge-base content is scanned before storage. Buyer messages, chat transcripts, order IDs, tracking numbers, phone numbers, addresses, payment data, customer names, logistics status, and refund transactions return `400 KB_CONTENT_REJECTED`.
+- Rejected KB content is never echoed in the response or written to audit logs.
+- DeepSeek timeout, exhausted retries, invalid JSON, schema failures, and out-of-range confidence all fail safe to human handling.

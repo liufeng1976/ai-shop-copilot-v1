@@ -6,7 +6,7 @@ const HIGH_RISK_RULES = Object.freeze([
   ["ADDRESS", /address|地址/i],
   ["PHONE", /phone|mobile|手机号|电话号码/i],
   ["COMPENSATION", /compensation|赔偿|补偿/i],
-  ["PRICE_CHANGE", /price change|改价|修改价格/i],
+  ["PRICE_CHANGE", /price change|change(?: the)? price|改价|修改价格/i],
   ["CANCEL", /cancel|取消/i],
   ["DELETE", /delete|删除/i],
   ["MODIFY", /modify|change order|修改|变更/i],

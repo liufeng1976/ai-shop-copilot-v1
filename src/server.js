@@ -14,6 +14,7 @@ import {
   rejectShopIdOverride
 } from "./middleware/authMiddleware.js";
 import { PolicyClassifier } from "./services/policyClassifier.js";
+import { ContentSafety } from "./services/contentSafety.js";
 import { createRateLimit } from "./middleware/rateLimit.js";
 import { MockPlatformAdapter } from "./adapters/mockPlatformAdapter.js";
 
@@ -58,6 +59,7 @@ export function createApp({
   platformAdapter = new MockPlatformAdapter(),
   authService = new AuthService(),
   policyClassifier = new PolicyClassifier(),
+  contentSafety = new ContentSafety(),
   rateLimit = createRateLimit(),
   corsOrigins = parseCorsOrigins(),
   shopConfigs
@@ -87,6 +89,13 @@ export function createApp({
 
   api.post("/kb/documents", (request, response, next) => {
     try {
+      const inspection = contentSafety.inspect(request.body?.content);
+      if (!inspection.safe) {
+        return response.status(400).json({
+          error: "Knowledge base content rejected",
+          code: "KB_CONTENT_REJECTED"
+        });
+      }
       const document = vectorStore.addDocument({
         ...request.body,
         shopId: request.shopId
@@ -184,6 +193,7 @@ export function createApp({
     platformAdapter,
     authService,
     policyClassifier,
+    contentSafety,
     chatService
   };
   return app;

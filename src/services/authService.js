@@ -13,7 +13,16 @@ function secretsEqual(left, right) {
 }
 
 export class AuthService {
-  constructor(merchants = DEFAULT_MERCHANTS) {
+  constructor(
+    merchants = DEFAULT_MERCHANTS,
+    { nodeEnv = process.env.NODE_ENV } = {}
+  ) {
+    if (
+      nodeEnv === "production" &&
+      merchants.some(({ apiKey }) => secretsEqual(apiKey, "demo-secret-key"))
+    ) {
+      throw new Error("demo-secret-key is forbidden in production");
+    }
     this.merchants = merchants.map(({ apiKey, shopId }) => ({
       apiKeyHash: hashSecret(apiKey),
       shopId: String(shopId)

@@ -15,15 +15,13 @@ export function createAuthMiddleware(authService) {
 }
 
 export function rejectShopIdOverride(request, response, next) {
-  const claimedShopIds = [
-    request.body?.shopId,
-    request.query?.shopId
-  ].filter((value) => value !== undefined);
-
-  if (claimedShopIds.some((shopId) => String(shopId) !== request.shopId)) {
+  if (
+    request.body?.shopId !== undefined ||
+    request.query?.shopId !== undefined
+  ) {
     return response.status(403).json({
       error: "Forbidden",
-      code: "TENANT_MISMATCH"
+      code: "CLIENT_SHOP_ID_FORBIDDEN"
     });
   }
   return next();
