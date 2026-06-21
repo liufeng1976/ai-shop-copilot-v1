@@ -2,7 +2,7 @@
   "name": "ai-shop-copilot-v1",
   "version": "1.0.0",
   "private": true,
-  "description": "Privacy-first V1 ecommerce customer-service AI copilot.",
+  "description": "Privacy-first ecommerce customer support AI with static shop knowledge.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
