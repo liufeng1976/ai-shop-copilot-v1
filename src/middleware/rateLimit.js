@@ -11,7 +11,7 @@ export function createRateLimit({
       "/:id"
     );
     const routeKey = `${request.method}:${normalizedPath}`;
-    const bucketKey = `${request.auth.apiKey}:${routeKey}`;
+    const bucketKey = `${request.apiKeyId}:${routeKey}`;
     const currentTime = now();
     const existing = buckets.get(bucketKey);
     const bucket =

@@ -1,22 +1,23 @@
 const HIGH_RISK_RULES = Object.freeze([
-  ["REFUND_AMOUNT", /退款金额|退多少钱|退款多少|refund amount/i],
-  ["ORDER_STATUS", /订单状态|订单到哪|order status/i],
-  ["LOGISTICS_STATUS", /物流状态|物流到哪|快递到哪|logistics status/i],
-  ["COMPENSATION", /赔偿|补偿|compensation/i],
-  ["PAYMENT", /支付|付款|payment/i],
-  ["PRICE_CHANGE", /改价|修改价格|price change/i],
-  ["DELETE_ORDER", /删除订单|取消订单|delete order/i],
-  ["MODIFY_ORDER", /修改订单|变更订单|modify order/i],
-  ["ADDRESS", /地址|收货地址|address/i],
-  ["PHONE", /手机号|手机号码|电话号码|phone number/i],
-  ["CUSTOMER_NAME", /客户姓名|买家姓名|收件人姓名|customer name/i]
+  ["REFUND", /refund|退款|退钱/i],
+  ["ORDER", /\border\b|订单/i],
+  ["PAYMENT", /payment|支付|付款/i],
+  ["LOGISTICS", /logistics|shipping status|物流|快递状态/i],
+  ["ADDRESS", /address|地址/i],
+  ["PHONE", /phone|mobile|手机号|电话号码/i],
+  ["COMPENSATION", /compensation|赔偿|补偿/i],
+  ["PRICE_CHANGE", /price change|改价|修改价格/i],
+  ["CANCEL", /cancel|取消/i],
+  ["DELETE", /delete|删除/i],
+  ["MODIFY", /modify|change order|修改|变更/i],
+  ["CUSTOMER_NAME", /customer name|客户姓名|买家姓名|收件人姓名/i]
 ]);
 
 const UNSAFE_REPLY_RULES = Object.freeze([
-  /(?:退款|退还).{0,12}(?:元|￥|¥|\d+(?:\.\d{1,2})?)/i,
-  /(?:赔偿|补偿).{0,16}(?:元|￥|¥|\d+(?:\.\d{1,2})?|已经|会|将)/i,
-  /(?:物流|快递).{0,16}(?:已到|到达|正在|将在|预计|送达)/i,
-  /订单.{0,16}(?:已完成|已取消|已发货|正在处理|将在|预计)/i
+  /(?:refund|退款|退还).{0,20}(?:amount|元|￥|¥|\d+(?:\.\d{1,2})?)/i,
+  /(?:compensation|赔偿|补偿).{0,20}(?:元|￥|¥|\d+(?:\.\d{1,2})?|will|会|将)/i,
+  /(?:logistics|shipping|物流|快递).{0,20}(?:delivered|arrive|已到|到达|正在|预计|送达)/i,
+  /(?:order status|订单状态|订单).{0,20}(?:completed|cancelled|shipped|已完成|已取消|已发货|正在处理)/i
 ]);
 
 export class PolicyClassifier {

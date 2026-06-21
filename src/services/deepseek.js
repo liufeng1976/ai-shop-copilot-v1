@@ -53,7 +53,7 @@ export class DeepSeekProvider {
     apiKey = process.env.DEEPSEEK_API_KEY,
     model = process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
     baseUrl = process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
-    timeoutMs = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 15000),
+    timeoutMs = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 5000),
     maxRetries = 2,
     fetchImpl = globalThis.fetch
   } = {}) {
@@ -70,7 +70,14 @@ export class DeepSeekProvider {
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       try {
-        return await this.#request({ buyerMessage, knowledge });
+        const result = await this.#request({ buyerMessage, knowledge });
+        if (result.confidence < 0.5) {
+          return safeFailure("LLM_LOW_CONFIDENCE");
+        }
+        if (hasUnsafeCommitment(result.reply)) {
+          return safeFailure("LLM_UNSAFE_COMMITMENT");
+        }
+        return result;
       } catch (error) {
         if (attempt === this.maxRetries) {
           const errorCode =
@@ -142,4 +149,13 @@ export class DeepSeekProvider {
   }
 }
 
-export { SYSTEM_PROMPT, normalizeResult };
+function hasUnsafeCommitment(reply) {
+  return [
+    /(?:refund|退款|退还).{0,20}(?:amount|元|￥|¥|\d+(?:\.\d{1,2})?)/i,
+    /(?:compensation|赔偿|补偿).{0,20}(?:元|￥|¥|\d+(?:\.\d{1,2})?|will|会|将)/i,
+    /(?:logistics|shipping|物流|快递).{0,20}(?:delivered|arrive|已到|到达|正在|预计|送达)/i,
+    /(?:order status|订单状态|订单).{0,20}(?:completed|cancelled|shipped|已完成|已取消|已发货|正在处理)/i
+  ].some((pattern) => pattern.test(reply));
+}
+
+export { SYSTEM_PROMPT, normalizeResult, hasUnsafeCommitment };

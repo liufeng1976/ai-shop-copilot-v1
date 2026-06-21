@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 const VECTOR_SIZE = 256;
-const ALLOWED_SOURCE_TYPES = new Set(["faq", "policy", "product", "script", "tone_guide"]);
+const ALLOWED_SOURCE_TYPES = new Set(["faq", "policy", "tone"]);
 const FORBIDDEN_SOURCE_TYPES = new Set([
   "buyer_message",
   "order",
   "customer",
   "payment",
-  "logistics"
+  "logistics",
+  "product",
+  "script",
+  "tone_guide"
 ]);
 
 function tokenize(text) {

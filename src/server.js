@@ -9,6 +9,10 @@ import { AuditLogger } from "./services/auditLogger.js";
 import { ReviewQueue } from "./services/reviewQueue.js";
 import { ChatService } from "./services/chatService.js";
 import { AuthService } from "./services/authService.js";
+import {
+  createAuthMiddleware,
+  rejectShopIdOverride
+} from "./middleware/authMiddleware.js";
 import { PolicyClassifier } from "./services/policyClassifier.js";
 import { createRateLimit } from "./middleware/rateLimit.js";
 import { MockPlatformAdapter } from "./adapters/mockPlatformAdapter.js";
@@ -77,15 +81,15 @@ export function createApp({
   });
 
   const api = express.Router();
-  api.use(authService.middleware());
-  api.use(authService.enforceTenant());
+  api.use(createAuthMiddleware(authService));
+  api.use(rejectShopIdOverride);
   api.use(rateLimit);
 
   api.post("/kb/documents", (request, response, next) => {
     try {
       const document = vectorStore.addDocument({
         ...request.body,
-        shopId: request.auth.shopId
+        shopId: request.shopId
       });
       response.status(201).json(document);
     } catch (error) {
@@ -95,12 +99,12 @@ export function createApp({
 
   api.get("/kb/documents", (request, response) => {
     return response.json({
-      items: vectorStore.listDocuments(request.auth.shopId)
+      items: vectorStore.listDocuments(request.shopId)
     });
   });
 
   api.delete("/kb/documents/:id", (request, response) => {
-    if (!vectorStore.deleteDocument(request.auth.shopId, request.params.id)) {
+    if (!vectorStore.deleteDocument(request.shopId, request.params.id)) {
       return response.status(404).json({ error: "Document not found" });
     }
     return response.status(204).send();
@@ -116,7 +120,7 @@ export function createApp({
         return response.status(413).json({ error: "buyerMessage is too long" });
       }
       const result = await chatService.preview({
-        shopId: request.auth.shopId,
+        shopId: request.shopId,
         buyerMessage,
         requestId
       });
@@ -130,7 +134,7 @@ export function createApp({
     try {
       return response.json({
         items: reviewQueue.list({
-          shopId: request.auth.shopId,
+          shopId: request.shopId,
           status: request.query.status
         })
       });
@@ -141,11 +145,11 @@ export function createApp({
 
   api.post("/reviews/:id/approve", async (request, response, next) => {
     try {
-      const review = reviewQueue.approve(request.auth.shopId, request.params.id);
+      const review = reviewQueue.approve(request.shopId, request.params.id);
       if (!review) return response.status(404).json({ error: "Review not found" });
       const receipt = await platformAdapter.sendReply({
-        shopId: request.auth.shopId,
-        reply: review.reply
+        shopId: request.shopId,
+        reply: review.ai_reply
       });
       return response.json({ review, receipt });
     } catch (error) {
@@ -155,7 +159,7 @@ export function createApp({
 
   api.post("/reviews/:id/reject", (request, response, next) => {
     try {
-      const review = reviewQueue.reject(request.auth.shopId, request.params.id);
+      const review = reviewQueue.reject(request.shopId, request.params.id);
       if (!review) return response.status(404).json({ error: "Review not found" });
       return response.json({ review });
     } catch (error) {

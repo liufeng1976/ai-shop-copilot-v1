@@ -1,6 +1,6 @@
-# AI Shop Copilot RC1
+# AI Shop Copilot RC1 Safety Layer
 
-电商客服 AI 的隐私优先 RC1 本地演示版本。本阶段只加固上线阻塞的鉴权、多租户隔离、限流、CORS、审计和模型安全边界，不扩展业务功能。
+电商客服 AI 的 RC1 production-ready safety layer。本阶段只加固上线阻塞的鉴权、多租户隔离、限流、CORS、审计和模型安全边界，不扩展业务功能。
 
 > 当前是 **RC1 local/demo**，不是生产版本。内存知识库、审核队列、API Key 配置和 Mock 平台发送器均需在正式上线前替换为生产基础设施。
 
@@ -12,6 +12,7 @@
 - Chat Preview 与人工审核队列
 - `X-API-Key` 全接口鉴权
 - API Key 绑定租户，客户端 `shopId` 不作为可信来源
+- API Key 仅以固定长度哈希参与比较和限流桶标识
 - 按 API Key + 路由的每分钟限流
 - CORS 来源白名单
 - 高风险规则拦截与模型回复二次安全检查
@@ -55,7 +56,7 @@ PORT=3000
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_TIMEOUT_MS=15000
+DEEPSEEK_TIMEOUT_MS=5000
 CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 RATE_LIMIT_PER_MINUTE=60
 ```
@@ -112,10 +113,10 @@ curl -X POST http://localhost:3000/api/v1/reviews/REVIEW_ID/reject \
 - 不写入数据库、文件、日志、缓存、审核队列或向量库。
 - 不保存订单、客户姓名、电话、地址、物流或支付数据。
 - 审计日志仅允许：
-  `request_id`、`shop_id`、`action`、`status`、`latency_ms`、`token_usage` 和非敏感 `error_code`。
+  `request_id`、`shop_id`、`action`、`status`、`latency_ms`、`token_usage`。
 - 审计日志禁止记录 `buyerMessage`、AI 回复和知识库正文。
 - 审核队列只保存脱敏后的 AI 草稿、置信度、静态知识引用及审核状态。
-- Vector KB 仅允许 `faq`、`policy`、`product`、`script`、`tone_guide` 静态商家文档。
+- Vector KB 仅允许 `faq`、`policy`、`tone` 静态商家文档。
 - 禁止 query history、用户画像、行为 embedding 和会话记忆。
 
 ## 安全策略

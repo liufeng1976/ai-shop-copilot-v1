@@ -68,8 +68,7 @@ test("review API cannot query, approve or reject another tenant's reviews", asyn
     requestId: "request-b",
     shopId: "shop-b",
     reply: "B 店草稿",
-    confidence: 0.8,
-    knowledgeRefs: []
+    confidence: 0.8
   });
 
   const listA = await request(app)

@@ -42,13 +42,11 @@ export class ChatService {
     const startedAt = Date.now();
     let tokenUsage = {};
     let status = "FAILED";
-    let errorCode;
 
     try {
       const policy = await this.policyClassifier.classify(buyerMessage);
       if (policy.highRisk) {
         status = "NEEDS_HUMAN";
-        errorCode = `POLICY_${policy.code}`;
         return {
           requestId,
           status,
@@ -61,13 +59,11 @@ export class ChatService {
       const knowledge = this.vectorStore.search(shopId, buyerMessage, 3);
       const result = await this.provider.generate({ buyerMessage, knowledge });
       tokenUsage = result.tokenUsage;
-      errorCode = result.errorCode ?? undefined;
       const safeReply = sanitizeDraft(result.reply);
       const replyPolicy = this.policyClassifier.inspectReply(safeReply);
 
       if (result.needsHuman || !replyPolicy.safe) {
         status = "NEEDS_HUMAN";
-        errorCode = replyPolicy.code ?? errorCode;
         return {
           requestId,
           status,
@@ -83,8 +79,7 @@ export class ChatService {
           requestId,
           shopId,
           reply: safeReply,
-          confidence: result.confidence,
-          knowledgeRefs: knowledge.map(({ id }) => id)
+          confidence: result.confidence
         });
       }
 
@@ -97,7 +92,6 @@ export class ChatService {
       };
     } catch {
       status = "NEEDS_HUMAN";
-      errorCode = "CHAT_SERVICE_FAILURE";
       return {
         requestId,
         status,
@@ -112,8 +106,7 @@ export class ChatService {
         action: "CHAT_PREVIEW",
         status,
         latencyMs: Date.now() - startedAt,
-        tokenUsage,
-        errorCode
+        tokenUsage
       });
     }
   }
