@@ -1,12 +1,18 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
+const DEMO_API_KEY_HASH =
+  "5f1f9d2aeeb8dc29dd47db2bfc0390b9ada7ded6707b592e9bba01fa7601761a";
 const DEFAULT_MERCHANTS = Object.freeze([
-  Object.freeze({ apiKey: "demo-secret-key", shopId: "demo-shop" })
+  Object.freeze({ apiKeyHash: DEMO_API_KEY_HASH, shopId: "demo-shop" })
 ]);
 const AUTHENTICATED_TENANT_CONTEXTS = new WeakSet();
 
 function hashSecret(value) {
   return createHash("sha256").update(String(value)).digest();
+}
+
+function hashSecretHex(value) {
+  return hashSecret(value).toString("hex");
 }
 
 function secretsEqual(left, right) {
@@ -20,12 +26,17 @@ export class AuthService {
   ) {
     if (
       nodeEnv === "production" &&
-      merchants.some(({ apiKey }) => secretsEqual(apiKey, "demo-secret-key"))
+      merchants.some(({ apiKey, apiKeyHash }) => {
+        const hash = apiKeyHash ?? hashSecretHex(apiKey);
+        return hash === DEMO_API_KEY_HASH;
+      })
     ) {
       throw new Error("demo-secret-key is forbidden in production");
     }
-    this.merchants = merchants.map(({ apiKey, shopId }) => ({
-      apiKeyHash: hashSecret(apiKey),
+    this.merchants = merchants.map(({ apiKey, apiKeyHash, shopId }) => ({
+      apiKeyHash: apiKeyHash
+        ? Buffer.from(String(apiKeyHash), "hex")
+        : hashSecret(apiKey),
       shopId: String(shopId)
     }));
   }
@@ -37,7 +48,7 @@ export class AuthService {
     );
     return merchant
       ? {
-          apiKeyId: hashSecret(apiKey).toString("hex"),
+          apiKeyId: hashSecretHex(apiKey),
           shopId: merchant.shopId
         }
       : null;
@@ -66,4 +77,4 @@ export function isAuthenticatedTenantContext(value) {
   );
 }
 
-export { DEFAULT_MERCHANTS, secretsEqual };
+export { DEFAULT_MERCHANTS, DEMO_API_KEY_HASH, hashSecretHex, secretsEqual };

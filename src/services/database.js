@@ -1,0 +1,63 @@
+import Database from "better-sqlite3";
+import { dirname } from "node:path";
+import { mkdirSync } from "node:fs";
+
+function ensureParentDirectory(filename) {
+  if (!filename || filename === ":memory:") return;
+  mkdirSync(dirname(filename), { recursive: true });
+}
+
+export class SqliteDatabase {
+  constructor({ filename = process.env.SQLITE_PATH ?? ":memory:" } = {}) {
+    ensureParentDirectory(filename);
+    this.db = new Database(filename);
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("foreign_keys = ON");
+    this.#migrate();
+  }
+
+  #migrate() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS kb_documents (
+        id TEXT PRIMARY KEY,
+        shop_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_kb_documents_shop
+        ON kb_documents(shop_id);
+
+      CREATE TABLE IF NOT EXISTS review_queue (
+        id TEXT PRIMARY KEY,
+        shop_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        ai_reply TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_review_queue_shop_status
+        ON review_queue(shop_id, status);
+
+      CREATE TABLE IF NOT EXISTS idempotency_keys (
+        shop_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        response_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (shop_id, key, kind)
+      );
+
+      CREATE TABLE IF NOT EXISTS webhook_replay_nonces (
+        nonce TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL
+      );
+    `);
+  }
+
+  close() {
+    this.db.close();
+  }
+}

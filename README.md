@@ -1,44 +1,24 @@
-# AI Shop Copilot RC1 Safety Layer
+# AI Shop Copilot V1
 
-电商客服 AI 的 RC1 production-ready safety layer。本阶段只加固上线阻塞的鉴权、多租户隔离、限流、CORS、审计和模型安全边界，不扩展业务功能。
+隐私优先的电商客服 AI 安全底座。当前版本聚焦生产级最小 SaaS 能力：租户鉴权、静态知识库、人工审核、安全降级、持久化、Webhook 防护、幂等和基础监控。
 
-> 当前是 **RC1 local/demo**，不是生产版本。内存知识库、审核队列、API Key 配置和 Mock 平台发送器均需在正式上线前替换为生产基础设施。
+当前仍是 RC 阶段，不接真实抖店 / 淘宝开放平台，不做自动铺货、自动选品、广告投放、Agent 自治系统，也不自动执行订单、退款、补偿或改价。
 
-## 当前能力
+## 核心能力
 
-- Node.js 20 + Express
-- DeepSeek Provider；无密钥时使用 deterministic mock
-- 按 `shopId` 隔离的私有静态 `LocalVectorStore`
-- Chat Preview 与人工审核队列
-- `X-API-Key` 全接口鉴权
-- API Key 绑定租户，客户端 `shopId` 不作为可信来源
-- API Key 仅以固定长度哈希参与比较和限流桶标识
-- 按 API Key + 路由的每分钟限流
-- CORS 来源白名单
-- 高风险规则拦截与模型回复二次安全检查
-- Mock 平台发送
-- 抖店、淘宝 Adapter 占位接口
+- Node.js 20+ / Express
+- DeepSeek Provider；未配置密钥时使用 deterministic mock，保证本地测试可跑
+- SQLite 持久化 KB 与 review queue，后续可替换为 Postgres repository
+- API Key → tenant 解析，客户端 `shopId` 全拒绝
+- API key 仅以 SHA-256 hash 形式保存和比较
+- LocalVectorStore 严格按认证 tenant context 隔离
+- Review queue 不保存 `buyerMessage`、raw context、prompt 或 vector context
+- Webhook HMAC 签名校验、时间戳窗口校验、nonce 重放防护
+- `requestId` / `platformMessageId` 幂等去重
+- 错误率、LLM 失败率、人工转接率基础 metrics
+- 全量安全测试覆盖
 
-RC1 **不支持真实抖店或淘宝 API**，也不包含自动铺货、自动选品、广告投放、Agent 自治系统，以及订单、退款或补偿的自动执行。
-
-## 本地商户
-
-```text
-apiKey = demo-secret-key
-shopId = demo-shop
-review_mode = MANUAL
-threshold = 0.9
-```
-
-所有 `/api/v1/chat`、`/api/v1/kb`、`/api/v1/reviews` 请求必须携带：
-
-```http
-X-API-Key: demo-secret-key
-```
-
-Client-provided `shopId` is forbidden in every `/api/v1` body and query. Tenant identity comes only from `X-API-Key`.
-
-## 启动
+## 本地启动
 
 ```bash
 npm install
@@ -47,21 +27,46 @@ npm test
 npm start
 ```
 
-服务默认监听 `http://localhost:3000`。
+默认监听：
+
+```text
+http://localhost:3000
+```
+
+## 本地 demo 商户
+
+```text
+apiKey = demo-secret-key
+shopId = demo-shop
+review_mode = MANUAL
+threshold = 0.9
+```
+
+`demo-secret-key` 仅限本地开发。`NODE_ENV=production` 时如果仍使用 demo key，应用会启动失败。
+
+所有 `/api/v1` 请求都需要：
+
+```http
+X-API-Key: demo-secret-key
+```
+
+客户端不得在 body、query 或 header 中传 `shopId`。租户身份只能来自 `X-API-Key`。
 
 ## 环境变量
 
 ```env
 PORT=3000
+SQLITE_PATH=.data/app.sqlite
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_TIMEOUT_MS=5000
 CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 RATE_LIMIT_PER_MINUTE=60
+WEBHOOK_SECRET=local-webhook-secret
 ```
 
-`CORS_ORIGINS` 使用逗号分隔。生产环境不会默认允许 `*`。
+生产环境不要使用默认 `WEBHOOK_SECRET`，也不要使用 demo API key。API key 应以 hash 形式配置到商户记录中，不在数据库或日志里保存明文。
 
 ## curl 示例
 
@@ -87,7 +92,7 @@ curl http://localhost:3000/api/v1/kb/documents \
 curl -X POST http://localhost:3000/api/v1/chat/preview \
   -H "X-API-Key: demo-secret-key" \
   -H "Content-Type: application/json" \
-  -d "{\"buyerMessage\":\"你们支持七天无理由退货吗？\"}"
+  -d "{\"requestId\":\"req-001\",\"buyerMessage\":\"你们支持七天无理由退货吗？\"}"
 ```
 
 查看待审核项：
@@ -97,66 +102,84 @@ curl "http://localhost:3000/api/v1/reviews?status=PENDING" \
   -H "X-API-Key: demo-secret-key"
 ```
 
-批准或拒绝：
+查看基础监控：
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/reviews/REVIEW_ID/approve \
-  -H "X-API-Key: demo-secret-key"
-
-curl -X POST http://localhost:3000/api/v1/reviews/REVIEW_ID/reject \
+curl http://localhost:3000/api/v1/metrics \
   -H "X-API-Key: demo-secret-key"
 ```
 
-## 隐私架构
+## Webhook 签名
 
-- `buyerMessage` 只在当前请求内存中用于策略分类、静态知识检索和模型调用。
-- 不写入数据库、文件、日志、缓存、审核队列或向量库。
-- 不保存订单、客户姓名、电话、地址、物流或支付数据。
-- 审计日志仅允许：
-  `request_id`、`shop_id`、`action`、`status`、`latency_ms`、`token_usage`。
-- 审计日志禁止记录 `buyerMessage`、AI 回复和知识库正文。
-- 审核队列只保存脱敏后的 AI 草稿、置信度、静态知识引用及审核状态。
-- Vector KB 仅允许 `faq`、`policy`、`tone` 静态商家文档。
-- 禁止 query history、用户画像、行为 embedding 和会话记忆。
+Webhook demo endpoint：
 
-## 安全策略
+```text
+POST /api/v1/webhooks/mock
+```
 
-- 退款金额、订单状态、物流状态、赔偿、支付、改价、删除或修改订单、地址、手机号、客户姓名等请求直接返回：
-  `当前问题需要人工客服协助处理`
-- 高风险请求不会调用 DeepSeek。
-- DeepSeek 请求设置超时，并最多重试 2 次。
-- 非法 JSON、字段缺失或置信度越界会安全降级为 `NEEDS_HUMAN`。
-- 模型回复若包含退款、赔偿、物流或订单状态承诺，也会强制转人工。
-- LLM classifier 仅预留接口，RC1 默认关闭。
+必须同时携带：
 
+```http
+X-API-Key: demo-secret-key
+X-Webhook-Timestamp: <unix-ms>
+X-Webhook-Nonce: <unique nonce>
+X-Webhook-Signature: HMAC_SHA256(secret, "<timestamp>.<rawBody>")
+```
 
-## RC1 P1 production safeguards
+安全策略：
 
-- `demo-secret-key` is for local development only. If `NODE_ENV=production` and the demo key remains configured, application startup fails immediately.
-- Clients must never send `shopId` in request bodies or query strings, even when it matches the API key tenant. Any client-provided `shopId` returns `403 CLIENT_SHOP_ID_FORBIDDEN`.
-- Knowledge-base content is scanned before storage. Buyer messages, chat transcripts, order IDs, tracking numbers, phone numbers, addresses, payment data, customer names, logistics status, and refund transactions return `400 KB_CONTENT_REJECTED`.
-- Rejected KB content is never echoed in the response or written to audit logs.
-- DeepSeek timeout, exhausted retries, invalid JSON, schema failures, and out-of-range confidence all fail safe to human handling.
+- 签名错误返回 `WEBHOOK_BAD_SIGNATURE`
+- 时间戳超出窗口返回 `WEBHOOK_TIMESTAMP_EXPIRED`
+- nonce 重复返回 `WEBHOOK_REPLAY_DETECTED`
+- `platformMessageId` 重复时返回第一次处理结果，不重复执行业务逻辑
 
-## RC1.5 enforced safety pipeline
+## 隐私与安全原则
 
-Every protected API request follows one fixed chain:
+- `buyerMessage` 只能在当前请求内存中使用
+- 不写入数据库、文件、日志、缓存、review queue 或 vector store
+- 不保存订单、客户姓名、电话、地址、物流或支付数据
+- Audit log 只允许 `request_id`、`shop_id`、`action`、`status`、`latency_ms`、`token_usage`
+- Vector KB 只允许静态商家文档：FAQ、售后政策、品牌语气
+- 禁止 query history、用户画像、行为 embedding、会话记忆
+- 默认 fail-safe：无法确认安全时返回 `NEEDS_HUMAN`
 
-1. `authMiddleware`
-2. `tenantResolver`
-3. per-key and per-route rate limiting
-4. `contentSafety` pre-gate
-5. rule-first `policyClassifier`
-6. tenant-bound vector retrieval
-7. DeepSeek generation
-8. response safety post-check
-9. sanitized audit logging
+## 高风险策略
 
-The chat pre-gate can stop a request before policy evaluation, vector retrieval, or
-LLM generation. Client-supplied `shopId` is rejected from body, query, and headers.
-Vector operations assert that the requested namespace matches the resolved tenant,
-and the review queue stores only `id`, `shop_id`, `request_id`, `ai_reply`,
-`confidence`, and `status`.
+以下内容直接进入人工处理，不调用 LLM：
 
-Requests have a 10-second hard deadline. Unexpected failures return the safe
-fallback `当前问题需要人工客服协助处理` without exposing internal error details.
+- 退款金额
+- 订单状态
+- 物流状态
+- 赔偿
+- 支付
+- 改价
+- 删除 / 修改订单
+- 地址
+- 手机号
+- 客户姓名
+
+固定回复：
+
+```text
+当前问题需要人工客服协助处理
+```
+
+DeepSeek 返回非法 JSON、缺字段、低置信度、超时、重试失败或包含承诺性退款 / 赔偿 / 物流 / 订单状态内容时，也会强制降级为人工处理。
+
+## 测试
+
+```bash
+npm test
+```
+
+当前测试覆盖：
+
+- 鉴权与租户隔离
+- KB / review SQLite 持久化
+- API key hash 管理
+- Webhook 签名、时间戳和重放防护
+- requestId / platformMessageId 幂等
+- buyerMessage 零持久化
+- 高风险问题不调用 LLM
+- DeepSeek fallback
+- metrics 不暴露用户文本

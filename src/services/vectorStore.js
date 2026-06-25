@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isAuthenticatedTenantContext } from "./authService.js";
+import { SqliteDatabase } from "./database.js";
 
 const VECTOR_SIZE = 256;
 const ALLOWED_SOURCE_TYPES = new Set(["faq", "policy", "tone"]);
@@ -61,7 +62,9 @@ function publicDocument(document) {
 }
 
 export class LocalVectorStore {
-  #shops = new Map();
+  constructor({ database = new SqliteDatabase() } = {}) {
+    this.database = database;
+  }
 
   #assertTenant(tenantContext, expectedShopId) {
     if (
@@ -95,36 +98,62 @@ export class LocalVectorStore {
       title: String(title),
       sourceType,
       content: String(content),
-      createdAt: new Date().toISOString(),
-      vector: embed(`${title}\n${content}`)
+      createdAt: new Date().toISOString()
     };
-    const partition = this.#shops.get(document.shopId) ?? new Map();
-    partition.set(document.id, document);
-    this.#shops.set(document.shopId, partition);
+    this.database.db
+      .prepare(
+        `INSERT INTO kb_documents
+          (id, shop_id, title, source_type, content, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        document.id,
+        document.shopId,
+        document.title,
+        document.sourceType,
+        document.content,
+        document.createdAt
+      );
     return publicDocument(document);
   }
 
   listDocuments(tenantContext, shopId) {
     const tenantShopId = this.#assertTenant(tenantContext, shopId);
-    const partition = this.#shops.get(tenantShopId);
-    return partition ? [...partition.values()].map(publicDocument) : [];
+    return this.database.db
+      .prepare(
+        `SELECT id, shop_id AS shopId, title, source_type AS sourceType,
+          content, created_at AS createdAt
+         FROM kb_documents
+         WHERE shop_id = ?
+         ORDER BY created_at ASC`
+      )
+      .all(tenantShopId)
+      .map(publicDocument);
   }
 
   deleteDocument(tenantContext, id, shopId) {
     const tenantShopId = this.#assertTenant(tenantContext, shopId);
-    const partition = this.#shops.get(tenantShopId);
-    return partition ? partition.delete(id) : false;
+    const result = this.database.db
+      .prepare("DELETE FROM kb_documents WHERE shop_id = ? AND id = ?")
+      .run(tenantShopId, String(id));
+    return result.changes > 0;
   }
 
   search(tenantContext, query, limit = 3, shopId) {
     const tenantShopId = this.#assertTenant(tenantContext, shopId);
-    const partition = this.#shops.get(tenantShopId);
-    if (!partition) return [];
+    const documents = this.database.db
+      .prepare(
+        `SELECT id, shop_id AS shopId, title, source_type AS sourceType,
+          content, created_at AS createdAt
+         FROM kb_documents
+         WHERE shop_id = ?`
+      )
+      .all(tenantShopId);
     const queryVector = embed(query);
-    return [...partition.values()]
+    return documents
       .map((document) => ({
         ...publicDocument(document),
-        score: similarity(queryVector, document.vector)
+        score: similarity(queryVector, embed(`${document.title}\n${document.content}`))
       }))
       .filter((document) => document.score > 0)
       .sort((left, right) => right.score - left.score)

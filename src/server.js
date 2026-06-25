@@ -21,6 +21,11 @@ import {
   REQUEST_TIMEOUT
 } from "./middleware/requestTimeout.js";
 import { MockPlatformAdapter } from "./adapters/mockPlatformAdapter.js";
+import { SqliteDatabase } from "./services/database.js";
+import { IdempotencyStore } from "./services/idempotencyStore.js";
+import { MetricsService } from "./services/metricsService.js";
+import { WebhookSecurity } from "./services/webhookSecurity.js";
+import { createWebhookSignatureMiddleware } from "./middleware/webhookSignature.js";
 
 const DEFAULT_CORS_ORIGINS = Object.freeze([
   "http://localhost:3000",
@@ -68,14 +73,20 @@ function createCorsMiddleware(allowedOrigins) {
 }
 
 export function createApp({
-  vectorStore = new LocalVectorStore(),
+  database = new SqliteDatabase({
+    filename: process.env.SQLITE_PATH ?? ":memory:"
+  }),
+  vectorStore = new LocalVectorStore({ database }),
   provider = new DeepSeekProvider(),
   auditLogger = new AuditLogger(),
-  reviewQueue = new ReviewQueue(),
+  reviewQueue = new ReviewQueue({ database }),
   platformAdapter = new MockPlatformAdapter(),
   authService = new AuthService(),
   policyClassifier = new PolicyClassifier(),
   contentSafety = new ContentSafety(),
+  idempotencyStore = new IdempotencyStore({ database }),
+  metricsService = new MetricsService(),
+  webhookSecurity = new WebhookSecurity({ database }),
   rateLimit = createRateLimit(),
   requestTimeout = createRequestTimeout(),
   corsOrigins = parseCorsOrigins(),
@@ -89,6 +100,7 @@ export function createApp({
     reviewQueue,
     policyClassifier,
     contentSafety,
+    metricsService,
     shopConfigs
   });
   const app = express();
@@ -102,7 +114,12 @@ export function createApp({
   const api = express.Router();
   api.use(createAuthMiddleware(authService));
   api.use(createCorsMiddleware(corsOrigins));
-  api.use(express.json({ limit: "32kb" }));
+  api.use(express.json({
+    limit: "32kb",
+    verify: (request, _response, buffer) => {
+      request.rawBody = buffer.toString("utf8");
+    }
+  }));
   api.use(createTenantResolver());
   api.use(rateLimit);
   api.use(requestTimeout);
@@ -145,6 +162,15 @@ export function createApp({
       if (buyerMessage.length > 4000) {
         return response.status(413).json({ error: "buyerMessage is too long" });
       }
+      const idempotencyKey = requestId ? String(requestId) : null;
+      if (idempotencyKey) {
+        const cached = idempotencyStore.get({
+          shopId: request.shopId,
+          key: idempotencyKey,
+          kind: "chat_preview"
+        });
+        if (cached) return response.json(cached);
+      }
       const result = await Promise.race([
         chatService.preview({
           tenantContext: request.tenantContext,
@@ -157,12 +183,23 @@ export function createApp({
       ]);
       if (result === REQUEST_TIMEOUT) {
         pipelineObserver([...request.pipelineTrace]);
-        return response.status(503).json({
+        metricsService.recordError();
+        const timeoutResponse = {
           requestId: requestId ?? "",
           status: "NEEDS_HUMAN",
           reply: HUMAN_HANDOFF_REPLY,
           confidence: 0,
           knowledgeHit: false
+        };
+        return response.status(503).json(timeoutResponse);
+      }
+      metricsService.recordChatResult(result);
+      if (idempotencyKey) {
+        idempotencyStore.set({
+          shopId: request.shopId,
+          key: idempotencyKey,
+          kind: "chat_preview",
+          response: result
         });
       }
       pipelineObserver([...request.pipelineTrace]);
@@ -209,15 +246,55 @@ export function createApp({
     }
   });
 
+  api.post(
+    "/webhooks/mock",
+    createWebhookSignatureMiddleware(webhookSecurity),
+    (request, response) => {
+      const platformMessageId = request.body?.platformMessageId;
+      if (!platformMessageId) {
+        return response.status(400).json({
+          error: "platformMessageId is required",
+          code: "PLATFORM_MESSAGE_ID_REQUIRED"
+        });
+      }
+      const cached = idempotencyStore.get({
+        shopId: request.shopId,
+        key: platformMessageId,
+        kind: "webhook"
+      });
+      if (cached) return response.json(cached);
+      const result = {
+        status: "ACCEPTED",
+        platformMessageId: String(platformMessageId)
+      };
+      idempotencyStore.set({
+        shopId: request.shopId,
+        key: platformMessageId,
+        kind: "webhook",
+        response: result
+      });
+      return response.json(result);
+    }
+  );
+
+  api.get("/metrics", (request, response) => {
+    return response.json({
+      shopId: request.shopId,
+      metrics: metricsService.snapshot()
+    });
+  });
+
   app.use("/api/v1", api);
 
   app.use((error, _request, response, next) => {
     if (response.headersSent) return next(error);
     const isClientError = error instanceof TypeError || error instanceof SyntaxError;
     if (isClientError) {
+      app.locals.services?.metricsService?.recordError();
       response.status(400).json({ error: error.message });
       return;
     }
+    app.locals.services?.metricsService?.recordError();
     response.status(500).json({
       status: "NEEDS_HUMAN",
       reply: HUMAN_HANDOFF_REPLY,
@@ -236,6 +313,10 @@ export function createApp({
     policyClassifier,
     contentSafety,
     chatService,
+    idempotencyStore,
+    metricsService,
+    webhookSecurity,
+    database,
     securityPipelineOrder: SECURITY_PIPELINE_ORDER
   };
   return app;

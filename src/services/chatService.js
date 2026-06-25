@@ -26,6 +26,7 @@ export class ChatService {
     provider,
     reviewQueue,
     auditLogger,
+    metricsService,
     policyClassifier = new PolicyClassifier(),
     contentSafety = new ContentSafety(),
     shopConfigs = {
@@ -36,6 +37,7 @@ export class ChatService {
     this.provider = provider;
     this.reviewQueue = reviewQueue;
     this.auditLogger = auditLogger;
+    this.metricsService = metricsService;
     this.policyClassifier = policyClassifier;
     this.contentSafety = contentSafety;
     this.shopConfigs = shopConfigs;
@@ -91,6 +93,9 @@ export class ChatService {
         knowledge,
         signal
       });
+      if (result.errorCode?.startsWith("LLM_")) {
+        this.metricsService?.recordLlmFailure();
+      }
       tokenUsage = result.tokenUsage;
       const safeReply = sanitizeDraft(result.reply);
       pipelineTrace.push("responseSafetyPostCheck");
