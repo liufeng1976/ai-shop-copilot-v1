@@ -117,6 +117,12 @@ Webhook demo endpoint：
 POST /api/v1/webhooks/mock
 ```
 
+RC2-A 平台网关 endpoint：
+
+```text
+POST /api/v1/webhooks/:platform/messages
+```
+
 必须同时携带：
 
 ```http
@@ -132,6 +138,26 @@ X-Webhook-Signature: HMAC_SHA256(secret, "<timestamp>.<rawBody>")
 - 时间戳超出窗口返回 `WEBHOOK_TIMESTAMP_EXPIRED`
 - nonce 重复返回 `WEBHOOK_REPLAY_DETECTED`
 - `platformMessageId` 重复时返回第一次处理结果，不重复执行业务逻辑
+
+平台消息会被标准化为内存中的 `PlatformMessage`：
+
+```text
+platform, shopId, platformMessageId, conversationId, receivedAt,
+messageText, senderRole, idempotencyKey
+```
+
+`messageText` 只在当前请求内存中使用，不进入日志、数据库、队列、向量库或幂等存储。
+
+## 平台接入状态
+
+- Manual Adapter：可用，用于本地手工网关测试；不会自动发送到真实平台
+- Douyin Adapter：接口骨架，等待开放平台权限；当前返回 `PLATFORM_NOT_CONFIGURED`
+- Taobao Adapter：接口骨架，等待开放平台权限；当前返回 `PLATFORM_NOT_CONFIGURED`
+- Amazon Adapter：网关预留骨架；当前返回 `PLATFORM_NOT_CONFIGURED`
+
+当前版本不支持自动发送和真实平台回发。审核通过后可生成 `ReplyCommand`，但真实平台 adapter 不会伪造发送成功。
+
+OAuth 目前只实现 state 防 CSRF、state TTL、平台配置检测和统一错误处理。当前不保存 access token 明文；未来如需保存 token，必须使用 `encryptedToken` 字段并配套 key rotation。
 
 ## 隐私与安全原则
 

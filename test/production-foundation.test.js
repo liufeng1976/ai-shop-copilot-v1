@@ -125,7 +125,9 @@ test("chat preview requestId is idempotent and does not re-call LLM", async () =
     .expect(200);
 
   assert.equal(calls, 1);
-  assert.deepEqual(second.body, first.body);
+  assert.equal(first.body.status, "SEND_READY");
+  assert.equal(second.body.duplicate, true);
+  assert.equal(JSON.stringify(app.locals.services.idempotencyStore.snapshot()).includes("idem-chat-1"), false);
 });
 
 test("webhook signature, timestamp and replay protection are enforced", async () => {
@@ -202,7 +204,9 @@ test("webhook platformMessageId is idempotent after signature verification", asy
   const first = await sendSigned("nonce-idem-1", "pm-idem").expect(200);
   const second = await sendSigned("nonce-idem-2", "pm-idem").expect(200);
 
-  assert.deepEqual(second.body, first.body);
+  assert.equal(first.body.status, "ACCEPTED");
+  assert.equal(second.body.duplicate, true);
+  assert.equal(JSON.stringify(app.locals.services.idempotencyStore.snapshot()).includes("pm-idem"), false);
 });
 
 test("metrics expose error, LLM failure and human handoff rates without user text", async () => {

@@ -1,39 +1,63 @@
+import { createHash } from "node:crypto";
+
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
+function hashKey(key) {
+  return createHash("sha256").update(String(key)).digest("hex");
+}
+
 export class IdempotencyStore {
-  constructor({ database, ttlMs = DEFAULT_TTL_MS } = {}) {
-    if (!database?.db) throw new TypeError("SQLite database is required");
-    this.database = database;
+  #items = new Map();
+
+  constructor({ ttlMs = DEFAULT_TTL_MS, now = () => Date.now() } = {}) {
     this.ttlMs = ttlMs;
+    this.now = now;
   }
 
-  get({ shopId, key, kind }) {
-    if (!shopId || !key || !kind) return null;
+  has(key) {
     this.#deleteExpired();
-    const row = this.database.db
-      .prepare(
-        "SELECT response_json FROM idempotency_keys WHERE shop_id = ? AND key = ? AND kind = ?"
-      )
-      .get(String(shopId), String(key), String(kind));
-    return row ? JSON.parse(row.response_json) : null;
+    return this.#items.has(hashKey(key));
   }
 
-  set({ shopId, key, kind, response }) {
-    if (!shopId || !key || !kind) return null;
-    const safeResponse = JSON.stringify(response ?? {});
-    this.database.db
-      .prepare(
-        `INSERT OR IGNORE INTO idempotency_keys
-          (shop_id, key, kind, response_json, created_at)
-          VALUES (?, ?, ?, ?, ?)`
-      )
-      .run(String(shopId), String(key), String(kind), safeResponse, Date.now());
-    return this.get({ shopId, key, kind });
+  reserve(key, ttl = this.ttlMs) {
+    this.#deleteExpired();
+    const keyHash = hashKey(key);
+    if (this.#items.has(keyHash)) return false;
+    this.#items.set(keyHash, {
+      keyHash,
+      status: "RESERVED",
+      expiresAt: this.now() + ttl
+    });
+    return true;
+  }
+
+  complete(key) {
+    const item = this.#items.get(hashKey(key));
+    if (!item) return false;
+    item.status = "COMPLETE";
+    return true;
+  }
+
+  release(key) {
+    return this.#items.delete(hashKey(key));
+  }
+
+  getStatus(key) {
+    this.#deleteExpired();
+    return this.#items.get(hashKey(key))?.status ?? null;
+  }
+
+  snapshot() {
+    this.#deleteExpired();
+    return [...this.#items.values()].map((item) => ({ ...item }));
   }
 
   #deleteExpired() {
-    this.database.db
-      .prepare("DELETE FROM idempotency_keys WHERE created_at < ?")
-      .run(Date.now() - this.ttlMs);
+    const now = this.now();
+    for (const [keyHash, item] of this.#items.entries()) {
+      if (item.expiresAt <= now) this.#items.delete(keyHash);
+    }
   }
 }
+
+export { hashKey };

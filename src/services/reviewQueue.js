@@ -86,6 +86,13 @@ export class ReviewQueue {
       .map(publicReview);
   }
 
+  get(shopId, id) {
+    const item = this.database.db
+      .prepare("SELECT * FROM review_queue WHERE id = ? AND shop_id = ?")
+      .get(String(id), String(shopId));
+    return item ? publicReview(item) : null;
+  }
+
   approve(shopId, id) {
     return this.#transition(shopId, id, "APPROVED");
   }

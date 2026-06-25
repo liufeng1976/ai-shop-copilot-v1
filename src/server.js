@@ -21,10 +21,16 @@ import {
   REQUEST_TIMEOUT
 } from "./middleware/requestTimeout.js";
 import { MockPlatformAdapter } from "./adapters/mockPlatformAdapter.js";
+import { DouyinAdapter } from "./adapters/douyinAdapter.js";
+import { TaobaoAdapter } from "./adapters/taobaoAdapter.js";
+import { ManualAdapter } from "./adapters/manualAdapter.js";
+import { PlatformAdapter } from "./adapters/platformAdapter.js";
 import { SqliteDatabase } from "./services/database.js";
 import { IdempotencyStore } from "./services/idempotencyStore.js";
 import { MetricsService } from "./services/metricsService.js";
 import { WebhookSecurity } from "./services/webhookSecurity.js";
+import { OAuthStateStore } from "./services/oauthStateStore.js";
+import { createReplyCommand } from "./domain/replyCommand.js";
 import { createWebhookSignatureMiddleware } from "./middleware/webhookSignature.js";
 
 const DEFAULT_CORS_ORIGINS = Object.freeze([
@@ -72,6 +78,20 @@ function createCorsMiddleware(allowedOrigins) {
   };
 }
 
+function platformNotConfigured(response) {
+  return response.status(503).json({
+    error: "Platform not configured",
+    code: "PLATFORM_NOT_CONFIGURED"
+  });
+}
+
+function webhookRejected(response, code) {
+  return response.status(401).json({
+    error: "Webhook rejected",
+    code
+  });
+}
+
 export function createApp({
   database = new SqliteDatabase({
     filename: process.env.SQLITE_PATH ?? ":memory:"
@@ -84,9 +104,11 @@ export function createApp({
   authService = new AuthService(),
   policyClassifier = new PolicyClassifier(),
   contentSafety = new ContentSafety(),
-  idempotencyStore = new IdempotencyStore({ database }),
+  idempotencyStore = new IdempotencyStore(),
+  oauthStateStore = new OAuthStateStore({ idempotencyStore }),
   metricsService = new MetricsService(),
   webhookSecurity = new WebhookSecurity({ database }),
+  platformAdapters,
   rateLimit = createRateLimit(),
   requestTimeout = createRequestTimeout(),
   corsOrigins = parseCorsOrigins(),
@@ -103,6 +125,12 @@ export function createApp({
     metricsService,
     shopConfigs
   });
+  const adapters = platformAdapters ?? {
+    manual: new ManualAdapter({ webhookSecurity }),
+    douyin: new DouyinAdapter(),
+    taobao: new TaobaoAdapter(),
+    amazon: new PlatformAdapter({ platform: "amazon", configured: false })
+  };
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
@@ -163,13 +191,17 @@ export function createApp({
         return response.status(413).json({ error: "buyerMessage is too long" });
       }
       const idempotencyKey = requestId ? String(requestId) : null;
-      if (idempotencyKey) {
-        const cached = idempotencyStore.get({
-          shopId: request.shopId,
-          key: idempotencyKey,
-          kind: "chat_preview"
+      if (idempotencyKey && !idempotencyStore.reserve(
+        `chat_preview:${request.shopId}:${idempotencyKey}`
+      )) {
+        return response.json({
+          requestId: idempotencyKey,
+          duplicate: true,
+          status: "NEEDS_HUMAN",
+          reply: HUMAN_HANDOFF_REPLY,
+          confidence: 0,
+          knowledgeHit: false
         });
-        if (cached) return response.json(cached);
       }
       const result = await Promise.race([
         chatService.preview({
@@ -195,12 +227,7 @@ export function createApp({
       }
       metricsService.recordChatResult(result);
       if (idempotencyKey) {
-        idempotencyStore.set({
-          shopId: request.shopId,
-          key: idempotencyKey,
-          kind: "chat_preview",
-          response: result
-        });
+        idempotencyStore.complete(`chat_preview:${request.shopId}:${idempotencyKey}`);
       }
       pipelineObserver([...request.pipelineTrace]);
       return response.json(result);
@@ -226,11 +253,43 @@ export function createApp({
     try {
       const review = reviewQueue.approve(request.shopId, request.params.id);
       if (!review) return response.status(404).json({ error: "Review not found" });
-      const receipt = await platformAdapter.sendReply({
+      return response.json({ review });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  api.post("/reviews/:id/send", async (request, response, next) => {
+    try {
+      const review = reviewQueue.get(request.shopId, request.params.id);
+      if (!review) return response.status(404).json({ error: "Review not found" });
+      if (review.status !== "APPROVED") {
+        return response.status(409).json({
+          error: "Review must be approved before send",
+          code: "REVIEW_NOT_APPROVED"
+        });
+      }
+      const platform = String(request.body?.platform ?? "manual").toLowerCase();
+      const adapter = adapters[platform];
+      if (!adapter || !adapter.getCapabilities().configured) {
+        return platformNotConfigured(response);
+      }
+      const command = createReplyCommand({
         shopId: request.shopId,
-        reply: review.ai_reply
+        platform,
+        conversationId: request.body?.conversationId,
+        platformMessageId: request.body?.platformMessageId,
+        replyText: review.ai_reply,
+        approvedBy: request.body?.approvedBy,
+        idempotencyKey:
+          request.body?.idempotencyKey ??
+          `${platform}:${request.shopId}:${request.body?.platformMessageId}:reply`
       });
-      return response.json({ review, receipt });
+      const receipt = await adapter.sendReply(command);
+      if (receipt?.code === "PLATFORM_NOT_CONFIGURED") {
+        return platformNotConfigured(response);
+      }
+      return response.json({ command, receipt });
     } catch (error) {
       return next(error);
     }
@@ -257,25 +316,121 @@ export function createApp({
           code: "PLATFORM_MESSAGE_ID_REQUIRED"
         });
       }
-      const cached = idempotencyStore.get({
-        shopId: request.shopId,
-        key: platformMessageId,
-        kind: "webhook"
-      });
-      if (cached) return response.json(cached);
+      const legacyKey = `legacy_webhook:${request.shopId}:${platformMessageId}`;
+      if (!idempotencyStore.reserve(legacyKey)) {
+        return response.json({ duplicate: true, platformMessageId: String(platformMessageId) });
+      }
       const result = {
         status: "ACCEPTED",
         platformMessageId: String(platformMessageId)
       };
-      idempotencyStore.set({
-        shopId: request.shopId,
-        key: platformMessageId,
-        kind: "webhook",
-        response: result
-      });
+      idempotencyStore.complete(legacyKey);
       return response.json(result);
     }
   );
+
+  api.post("/webhooks/:platform/messages", async (request, response, next) => {
+    try {
+      const platform = String(request.params.platform).toLowerCase();
+      const adapter = adapters[platform];
+      if (!adapter) {
+        return platformNotConfigured(response);
+      }
+      const verification = await adapter.verifyWebhook(request);
+      if (!verification.ok) {
+        if (verification.code === "PLATFORM_NOT_CONFIGURED") {
+          return platformNotConfigured(response);
+        }
+        return webhookRejected(response, verification.code);
+      }
+      const normalized = adapter.normalizeIncomingMessage({
+        ...request.body,
+        platform,
+        shopId: request.shopId,
+        idempotencyKey: `${platform}:${request.shopId}:${request.body?.platformMessageId}`
+      });
+      const idempotencyKey = normalized.idempotencyKey;
+      if (!idempotencyStore.reserve(idempotencyKey)) {
+        return response.json({
+          duplicate: true,
+          idempotencyKey
+        });
+      }
+      const result = await chatService.preview({
+        tenantContext: request.tenantContext,
+        buyerMessage: normalized.messageText,
+        requestId: idempotencyKey,
+        signal: request.abortSignal,
+        pipelineTrace: request.pipelineTrace
+      });
+      metricsService.recordChatResult(result);
+      idempotencyStore.complete(idempotencyKey);
+      return response.json({
+        duplicate: false,
+        platform,
+        platformMessageId: normalized.platformMessageId,
+        preview: result
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  api.get("/integrations/:platform/authorize", (request, response) => {
+    const platform = String(request.params.platform).toLowerCase();
+    const adapter = adapters[platform];
+    if (!adapter || !adapter.getCapabilities().configured) {
+      return platformNotConfigured(response);
+    }
+    const state = oauthStateStore.create({ shopId: request.shopId, platform });
+    const authorization = adapter.getAuthorizationUrl(state);
+    if (authorization?.code === "PLATFORM_NOT_CONFIGURED") {
+      return platformNotConfigured(response);
+    }
+    return response.json({
+      platform,
+      state,
+      authorizationUrl: authorization.authorizationUrl
+    });
+  });
+
+  api.get("/integrations/:platform/callback", async (request, response, next) => {
+    try {
+      const platform = String(request.params.platform).toLowerCase();
+      const adapter = adapters[platform];
+      if (!adapter || !adapter.getCapabilities().configured) {
+        return platformNotConfigured(response);
+      }
+      const state = request.query.state;
+      if (!state) {
+        return response.status(400).json({
+          error: "OAuth state is required",
+          code: "OAUTH_STATE_REQUIRED"
+        });
+      }
+      if (!oauthStateStore.consume({ shopId: request.shopId, platform, state })) {
+        return response.status(400).json({
+          error: "OAuth state is invalid or expired",
+          code: "OAUTH_STATE_INVALID"
+        });
+      }
+      const result = await adapter.exchangeAuthorizationCode(request.query.code);
+      if (result?.code === "PLATFORM_NOT_CONFIGURED") {
+        return platformNotConfigured(response);
+      }
+      return response.json({
+        platform,
+        status: "AUTHORIZED",
+        encryptedToken: result.encryptedToken ?? null,
+        keyRotation: {
+          supported: true,
+          keyVersion: result.keyVersion ?? null
+        }
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   api.get("/metrics", (request, response) => {
     return response.json({
@@ -309,11 +464,13 @@ export function createApp({
     auditLogger,
     reviewQueue,
     platformAdapter,
+    platformAdapters: adapters,
     authService,
     policyClassifier,
     contentSafety,
     chatService,
     idempotencyStore,
+    oauthStateStore,
     metricsService,
     webhookSecurity,
     database,

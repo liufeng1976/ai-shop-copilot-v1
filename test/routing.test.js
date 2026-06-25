@@ -188,7 +188,7 @@ test("unsafe promises in LLM reply are forced to NEEDS_HUMAN", async () => {
   assert.equal(app.locals.services.reviewQueue.list({ shopId: "demo-shop" }).length, 0);
 });
 
-test("review approval uses mock adapter and rejection is supported", async () => {
+test("review approval changes status without automatic sending and rejection is supported", async () => {
   const app = createApp({ provider: providerResult() });
   await chat(app, "支持退货吗？").expect(200);
   const [first] = app.locals.services.reviewQueue.list({ shopId: "demo-shop" });
@@ -197,7 +197,7 @@ test("review approval uses mock adapter and rejection is supported", async () =>
     .set("X-API-Key", API_KEY)
     .expect(200);
   assert.equal(approved.body.review.status, "APPROVED");
-  assert.equal(approved.body.receipt.provider, "mock");
+  assert.equal(approved.body.receipt, undefined);
 
   await chat(app, "售后时效多久？").expect(200);
   const pending = app.locals.services.reviewQueue
