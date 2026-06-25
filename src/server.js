@@ -24,7 +24,6 @@ import { MockPlatformAdapter } from "./adapters/mockPlatformAdapter.js";
 import { DouyinAdapter } from "./adapters/douyinAdapter.js";
 import { TaobaoAdapter } from "./adapters/taobaoAdapter.js";
 import { ManualAdapter } from "./adapters/manualAdapter.js";
-import { PlatformAdapter } from "./adapters/platformAdapter.js";
 import { SqliteDatabase } from "./services/database.js";
 import { IdempotencyStore } from "./services/idempotencyStore.js";
 import { MetricsService } from "./services/metricsService.js";
@@ -137,8 +136,7 @@ export function createApp({
   const adapters = platformAdapters ?? {
     manual: new ManualAdapter({ webhookSecurity }),
     douyin: new DouyinAdapter(),
-    taobao: new TaobaoAdapter(),
-    amazon: new PlatformAdapter({ platform: "amazon", configured: false })
+    taobao: new TaobaoAdapter()
   };
   const fallbackService = fallbackReplyService ?? new FallbackReplyService({
     adapters
