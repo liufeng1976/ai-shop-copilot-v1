@@ -258,7 +258,20 @@ export function createApp({
       return response.json({
         items: reviewQueue.list({
           shopId: request.shopId,
-          status: request.query.status
+          status: request.query.status,
+          priority: request.query.priority
+        })
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  api.get("/reviews/summary", (request, response, next) => {
+    try {
+      return response.json({
+        summary: reviewQueue.summary({
+          shopId: request.shopId
         })
       });
     } catch (error) {

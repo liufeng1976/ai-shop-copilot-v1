@@ -5,6 +5,7 @@ import { COMMERCE_INTENTS } from "./commerceIntentClassifier.js";
 
 const VALID_STATUSES = new Set(["PENDING", "APPROVED", "REJECTED"]);
 const VALID_PRIORITIES = new Set(["HIGH", "MEDIUM", "LOW"]);
+const SUMMARY_INTENTS = Object.freeze(Object.values(COMMERCE_INTENTS));
 
 const HIGH_PRIORITY_INTENTS = new Set([
   COMMERCE_INTENTS.COMPLAINT_RISK,
@@ -106,9 +107,12 @@ export class ReviewQueue {
     return publicReview(item);
   }
 
-  list({ shopId, status } = {}) {
+  list({ shopId, status, priority } = {}) {
     if (status && !VALID_STATUSES.has(status)) {
       throw new TypeError("Invalid review status");
+    }
+    if (priority && !VALID_PRIORITIES.has(priority)) {
+      throw new TypeError("Invalid review priority");
     }
     const clauses = [];
     const values = [];
@@ -119,6 +123,10 @@ export class ReviewQueue {
     if (status) {
       clauses.push("status = ?");
       values.push(String(status));
+    }
+    if (priority) {
+      clauses.push("priority = ?");
+      values.push(String(priority));
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     return this.database.db
@@ -134,6 +142,25 @@ export class ReviewQueue {
       )
       .all(...values)
       .map(publicReview);
+  }
+
+  summary({ shopId } = {}) {
+    const pending = this.list({ shopId, status: "PENDING" });
+    const byIntent = Object.fromEntries(SUMMARY_INTENTS.map((intent) => [intent, 0]));
+    const counts = {
+      total_pending: pending.length,
+      high_priority_pending: 0,
+      medium_priority_pending: 0,
+      low_priority_pending: 0,
+      pending_by_intent: byIntent
+    };
+    for (const item of pending) {
+      if (item.priority === "HIGH") counts.high_priority_pending += 1;
+      else if (item.priority === "MEDIUM") counts.medium_priority_pending += 1;
+      else counts.low_priority_pending += 1;
+      counts.pending_by_intent[item.intent] = (counts.pending_by_intent[item.intent] ?? 0) + 1;
+    }
+    return structuredClone(counts);
   }
 
   get(shopId, id) {
