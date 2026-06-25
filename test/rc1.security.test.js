@@ -77,7 +77,12 @@ test("RC1 buyerMessage is absent from audit and review queue", async () => {
     "request_id",
     "ai_reply",
     "confidence",
-    "status"
+    "intent",
+    "risk_level",
+    "priority",
+    "review_note",
+    "status",
+    "created_at"
   ]);
 });
 
@@ -106,7 +111,7 @@ test("RC1 audit logger drops all non-whitelisted text fields", () => {
   assert.equal(JSON.stringify(record).includes("must-not-persist"), false);
 });
 
-test("RC1 review queue rejects buyerMessage and stores an exact schema", () => {
+test("RC1 review queue rejects buyerMessage and stores only allowed non-sensitive fields", () => {
   const queue = new ReviewQueue();
   assert.throws(
     () =>
@@ -135,9 +140,15 @@ test("RC1 review queue rejects buyerMessage and stores an exact schema", () => {
     "request_id",
     "ai_reply",
     "confidence",
-    "status"
+    "intent",
+    "risk_level",
+    "priority",
+    "review_note",
+    "status",
+    "created_at"
   ]);
   assert.equal(JSON.stringify(item).includes("discarded"), false);
+  assert.equal(JSON.stringify(item).includes("unrelated buyer question"), false);
 });
 
 test("RC1 vector store only accepts faq, policy and tone", () => {

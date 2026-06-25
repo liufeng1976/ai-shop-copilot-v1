@@ -82,7 +82,7 @@ test("RC1.5 rejects fake shopId from body, query, and headers", async () => {
   ).expect(403);
 });
 
-test("RC1.5 review queue stores only the six allowed fields", () => {
+test("RC1.5 review queue stores only allowed non-sensitive fields", () => {
   const queue = new ReviewQueue();
   for (const forbidden of [
     { buyerMessage: "private" },
@@ -118,8 +118,14 @@ test("RC1.5 review queue stores only the six allowed fields", () => {
     "request_id",
     "ai_reply",
     "confidence",
-    "status"
+    "intent",
+    "risk_level",
+    "priority",
+    "review_note",
+    "status",
+    "created_at"
   ]);
+  assert.equal(JSON.stringify(item).includes("unrelated buyer question"), false);
 });
 
 test("RC1.5 vectorStore throws on cross-shop namespace access", () => {

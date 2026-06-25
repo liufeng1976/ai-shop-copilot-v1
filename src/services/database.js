@@ -35,11 +35,16 @@ export class SqliteDatabase {
         request_id TEXT NOT NULL,
         ai_reply TEXT NOT NULL,
         confidence REAL NOT NULL,
+        intent TEXT NOT NULL DEFAULT 'UNKNOWN',
+        risk_level TEXT NOT NULL DEFAULT 'LOW',
+        priority TEXT NOT NULL DEFAULT 'LOW',
         status TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_review_queue_shop_status
         ON review_queue(shop_id, status);
+      CREATE INDEX IF NOT EXISTS idx_review_queue_priority
+        ON review_queue(shop_id, status, priority, created_at);
 
       CREATE TABLE IF NOT EXISTS idempotency_keys (
         shop_id TEXT NOT NULL,
@@ -73,6 +78,15 @@ export class SqliteDatabase {
       CREATE INDEX IF NOT EXISTS idx_sla_records_status
         ON sla_records(status, fallback_at, deadline_at);
     `);
+    this.#ensureColumn("review_queue", "intent", "TEXT NOT NULL DEFAULT 'UNKNOWN'");
+    this.#ensureColumn("review_queue", "risk_level", "TEXT NOT NULL DEFAULT 'LOW'");
+    this.#ensureColumn("review_queue", "priority", "TEXT NOT NULL DEFAULT 'LOW'");
+  }
+
+  #ensureColumn(table, column, definition) {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all();
+    if (columns.some((item) => item.name === column)) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
   close() {

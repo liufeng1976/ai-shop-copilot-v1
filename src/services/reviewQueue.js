@@ -1,17 +1,49 @@
 import { randomUUID } from "node:crypto";
 import { isReviewSafeResult } from "./contentSafety.js";
 import { SqliteDatabase } from "./database.js";
+import { COMMERCE_INTENTS } from "./commerceIntentClassifier.js";
 
 const VALID_STATUSES = new Set(["PENDING", "APPROVED", "REJECTED"]);
+const VALID_PRIORITIES = new Set(["HIGH", "MEDIUM", "LOW"]);
+
+const HIGH_PRIORITY_INTENTS = new Set([
+  COMMERCE_INTENTS.COMPLAINT_RISK,
+  COMMERCE_INTENTS.FORBIDDEN_ACTION,
+  COMMERCE_INTENTS.ORDER_SENSITIVE
+]);
+
+const MEDIUM_PRIORITY_INTENTS = new Set([
+  COMMERCE_INTENTS.LOGISTICS,
+  COMMERCE_INTENTS.AFTER_SALE
+]);
+
+const REVIEW_NOTES = Object.freeze({
+  [COMMERCE_INTENTS.FORBIDDEN_ACTION]: "禁止承诺 / 必须人工核实",
+  [COMMERCE_INTENTS.COMPLAINT_RISK]: "投诉/差评风险 / 优先处理",
+  [COMMERCE_INTENTS.ORDER_SENSITIVE]: "订单/支付/地址/手机号敏感信息 / 人工核实"
+});
+
+export function priorityForIntent(intent) {
+  if (HIGH_PRIORITY_INTENTS.has(intent)) return "HIGH";
+  if (MEDIUM_PRIORITY_INTENTS.has(intent)) return "MEDIUM";
+  return "LOW";
+}
 
 function publicReview(item) {
+  const intent = item.intent ?? COMMERCE_INTENTS.UNKNOWN;
+  const priority = VALID_PRIORITIES.has(item.priority) ? item.priority : priorityForIntent(intent);
   return structuredClone({
     id: item.id,
     shop_id: item.shop_id,
     request_id: item.request_id,
     ai_reply: item.ai_reply,
     confidence: item.confidence,
-    status: item.status
+    intent,
+    risk_level: item.risk_level ?? "LOW",
+    priority,
+    review_note: REVIEW_NOTES[intent] ?? null,
+    status: item.status,
+    created_at: item.created_at
   });
 }
 
@@ -38,20 +70,26 @@ export class ReviewQueue {
       throw new TypeError("Verified review-safe reply is required");
     }
 
+    const intent = String(input.intent ?? COMMERCE_INTENTS.UNKNOWN);
+    const riskLevel = String(input.riskLevel ?? input.risk_level ?? "LOW");
+    const priority = priorityForIntent(intent);
     const item = {
       id: randomUUID(),
       shop_id: String(input.shopId),
       request_id: String(input.requestId),
       ai_reply: input.reviewSafety.reply,
       confidence: Number(input.confidence),
+      intent,
+      risk_level: riskLevel,
+      priority,
       status: "PENDING",
       created_at: new Date().toISOString()
     };
     this.database.db
       .prepare(
         `INSERT INTO review_queue
-          (id, shop_id, request_id, ai_reply, confidence, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`
+          (id, shop_id, request_id, ai_reply, confidence, intent, risk_level, priority, status, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         item.id,
@@ -59,6 +97,9 @@ export class ReviewQueue {
         item.request_id,
         item.ai_reply,
         item.confidence,
+        item.intent,
+        item.risk_level,
+        item.priority,
         item.status,
         item.created_at
       );
@@ -81,7 +122,16 @@ export class ReviewQueue {
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     return this.database.db
-      .prepare(`SELECT * FROM review_queue ${where} ORDER BY created_at ASC`)
+      .prepare(
+        `SELECT * FROM review_queue ${where}
+         ORDER BY
+           CASE priority
+             WHEN 'HIGH' THEN 1
+             WHEN 'MEDIUM' THEN 2
+             ELSE 3
+           END ASC,
+           created_at ASC`
+      )
       .all(...values)
       .map(publicReview);
   }

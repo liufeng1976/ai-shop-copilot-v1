@@ -112,7 +112,8 @@ export class ChatService {
           shopId,
           reply: templateDraft,
           buyerMessage,
-          confidence: 0.6
+          confidence: 0.6,
+          commerceIntent
         });
         return this.#response({
           requestId,
@@ -156,7 +157,8 @@ export class ChatService {
         shopId,
         reply: safeReply,
         buyerMessage,
-        confidence: result.confidence
+        confidence: result.confidence,
+        commerceIntent
       });
 
       return this.#response({
@@ -212,7 +214,14 @@ export class ChatService {
     return null;
   }
 
-  #enqueueReviewDraft({ requestId, shopId, reply, buyerMessage, confidence }) {
+  #enqueueReviewDraft({
+    requestId,
+    shopId,
+    reply,
+    buyerMessage,
+    confidence,
+    commerceIntent
+  }) {
     const reviewSafeReply = this.contentSafety.sanitizeReviewReply(
       reply,
       buyerMessage
@@ -221,7 +230,9 @@ export class ChatService {
       requestId,
       shopId,
       reviewSafety: reviewSafeReply,
-      confidence
+      confidence,
+      intent: commerceIntent?.intent,
+      riskLevel: commerceIntent?.riskLevel
     });
   }
 
