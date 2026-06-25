@@ -13,6 +13,11 @@ const INTENT_RULES = Object.freeze([
     intent: INTENTS.FORBIDDEN_ACTION,
     riskLevel: "HIGH",
     patterns: [
+      /(?:execute|process|do|issue|send|give)\s+(?:a\s+)?refund/i,
+      /(?:refund|compensate|compensation).*(?:amount|\d+(?:\.\d{1,2})?|\$|yuan|rmb)/i,
+      /(?:change|modify|adjust).*(?:price|order)/i,
+      /(?:close|cancel|delete).*(?:order|transaction)/i,
+      /(?:promise|guarantee).*(?:refund|compensation|ship|delivery|arrival)/i,
       /(?:执行|直接|马上|立刻)?退款/i,
       /退(?:我|给我)?\s*(?:\d+(?:\.\d{1,2})?\s*)?(?:元|块|￥|¥)/i,
       /(?:改价|改价格|修改价格|调价|便宜点|优惠到)/i,
@@ -25,6 +30,8 @@ const INTENT_RULES = Object.freeze([
     intent: INTENTS.ORDER_SENSITIVE,
     riskLevel: "HIGH",
     patterns: [
+      /(?:order|payment|pay|paid|address|phone|mobile|customer|identity).*(?:status|check|change|update|number|info|information)?/i,
+      /(?:check|look up|update|change).*(?:order|payment|address|phone|mobile)/i,
       /(?:订单状态|订单进度|订单号|订单编号|查订单|我的订单)/i,
       /(?:支付|付款|付钱|扣款|账单|发票)/i,
       /(?:地址|收货地址|改地址|修改地址)/i,
@@ -36,6 +43,8 @@ const INTENT_RULES = Object.freeze([
     intent: INTENTS.COMPLAINT_RISK,
     riskLevel: "MEDIUM",
     patterns: [
+      /(?:bad review|negative review|complaint|complain|report|platform intervention|angry|upset|terrible|scam|fraud)/i,
+      /(?:customer service|support).*(?:bad|rude|terrible|unhelpful)/i,
       /(?:差评|投诉|举报|维权|平台介入|小二介入)/i,
       /(?:生气|气死|太差|垃圾|不满意|失望|欺骗|骗子)/i,
       /(?:态度|客服).*(?:差|不好|恶劣)/i
@@ -45,6 +54,9 @@ const INTENT_RULES = Object.freeze([
     intent: INTENTS.LOGISTICS,
     riskLevel: "MEDIUM",
     patterns: [
+      /(?:logistics|shipping|shipment|package|parcel|tracking|tracking number|courier|delivery)/i,
+      /(?:when|where).*(?:ship|shipped|arrive|delivered|package|parcel)/i,
+      /(?:urge|rush|expedite).*(?:shipment|shipping|delivery|dispatch)/i,
       /(?:物流|快递|运单|单号|配送|派送|签收)/i,
       /(?:催发货|催一下|什么时候发货|多久发货|发货时效|发了吗|还没发)/i,
       /(?:什么时候到|多久到|到哪了|送到哪里|预计到达)/i
@@ -54,6 +66,8 @@ const INTENT_RULES = Object.freeze([
     intent: INTENTS.AFTER_SALE,
     riskLevel: "MEDIUM",
     patterns: [
+      /(?:after[-\s]?sale|return|exchange|refund policy|return policy|warranty|defect|damaged|missing item|wrong item)/i,
+      /(?:seven|7).*(?:day|days).*(?:return|exchange)/i,
       /(?:退货|换货|退款|售后|退换|退换货)/i,
       /(?:七天无理由|7天无理由|质量问题|坏了|破损|少件|漏发|错发)/i,
       /(?:售后政策|退货政策|换货政策|退款规则)/i

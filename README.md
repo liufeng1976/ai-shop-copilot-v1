@@ -259,6 +259,94 @@ X-API-Key: demo-secret-key
 - `FORBIDDEN_ACTION`：禁止承诺退款、补偿、改价、修改或关闭订单，必须人工核实
 - `ORDER_SENSITIVE`：涉及订单、支付、地址、手机号等敏感信息，必须人工核实
 
+## 第五阶段：本地 Demo 闭环
+
+本地 demo 只用于快速验收“AI 生成草稿 → 人工审核 → manual/mock 发送命令”的闭环，不接真实抖店 / 淘宝 API，不自动发送任何真实平台消息。
+
+### 一键生成 demo 审核项
+
+先启动服务：
+
+```bash
+npm start
+```
+
+另开一个终端执行：
+
+```bash
+npm run demo:seed
+```
+
+可选环境变量：
+
+```bash
+DEMO_BASE_URL=http://localhost:3000
+DEMO_API_KEY=demo-secret-key
+DEMO_RUN_ID=local-demo-001
+```
+
+seed 会生成 7 类审核项：
+
+- `PRE_SALE`
+- `LOGISTICS`
+- `AFTER_SALE`
+- `COMPLAINT_RISK`
+- `ORDER_SENSITIVE`
+- `FORBIDDEN_ACTION`
+- `UNKNOWN`
+
+脚本只打印 `label / requestId / intent / priority / status` 等非敏感信息，不打印模拟买家问题原文。
+
+### 手动 curl Demo 流程
+
+1. 生成一条 AI 草稿：
+
+```bash
+curl -s -X POST http://localhost:3000/api/v1/chat/preview \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: demo-secret-key" \
+  -d "{\"requestId\":\"demo-manual-001\",\"buyerMessage\":\"I am angry and will leave a bad review and complaint.\"}"
+```
+
+2. 查看审核台 summary：
+
+```bash
+curl -s http://localhost:3000/api/v1/reviews/summary \
+  -H "X-API-Key: demo-secret-key"
+```
+
+3. 查看高优先级审核项：
+
+```bash
+curl -s "http://localhost:3000/api/v1/reviews?priority=HIGH&status=PENDING" \
+  -H "X-API-Key: demo-secret-key"
+```
+
+4. 审核通过某条 review：
+
+```bash
+curl -s -X POST http://localhost:3000/api/v1/reviews/<review-id>/approve \
+  -H "X-API-Key: demo-secret-key"
+```
+
+5. 走 manual/mock 发送命令：
+
+```bash
+curl -s -X POST http://localhost:3000/api/v1/reviews/<review-id>/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: demo-secret-key" \
+  -d "{\"platform\":\"manual\",\"conversationId\":\"demo-conversation\",\"platformMessageId\":\"demo-message\",\"approvedBy\":\"demo-human-agent\"}"
+```
+
+返回中的 `receipt.sent = false`，表示不会自动发送真实平台消息，只生成 manual delivery 结果。
+
+### 3 分钟老板演示脚本
+
+1. 第 0-60 秒：运行 `npm run demo:seed`，打开 `/api/v1/reviews/summary`，先看 `high_priority_pending`。说明系统会把投诉/差评、禁止承诺动作、订单敏感问题自动排到高优先级。
+2. 第 60-120 秒：打开 `/api/v1/reviews?priority=HIGH&status=PENDING`，展示 `review_note`，重点讲“投诉/差评优先处理”和“禁止承诺 / 必须人工核实”。
+3. 第 120-160 秒：查看中优先级的物流/售后草稿，说明 AI 只生成安抚和政策型草稿，不编造物流状态、不承诺退款结果。
+4. 第 160-180 秒：approve 一条 review，再调用 `/send`。展示返回 `MANUAL_DELIVERY_REQUIRED` 和 `sent:false`，强调当前阶段只完成副驾驶闭环，不会自动发送真实抖店/淘宝消息。
+
 ## Webhook 签名
 
 平台网关 endpoint：
