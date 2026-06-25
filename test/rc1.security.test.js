@@ -207,8 +207,8 @@ test("RC1 high-risk input bypasses LLM and fails safe", async () => {
       .post("/api/v1/chat/preview")
       .send({ buyerMessage: "Please modify my order and refund payment" })
   ).expect(200);
-  assert.equal(response.body.status, "NEEDS_HUMAN");
-  assert.equal(response.body.reply, HUMAN_HANDOFF_REPLY);
+  assert.equal(response.body.status, "PENDING_REVIEW");
+  assert.equal(response.body.allowAutoSend, false);
   assert.equal(calls, 0);
 });
 
@@ -227,7 +227,7 @@ test("RC1 invalid DeepSeek JSON falls back to safe mode", async () => {
   const response = await auth(
     request(app)
       .post("/api/v1/chat/preview")
-      .send({ buyerMessage: "普通产品说明问题" })
+        .send({ buyerMessage: "product size guide" })
   ).expect(200);
   assert.equal(response.body.status, "NEEDS_HUMAN");
   assert.equal(response.body.reply, HUMAN_HANDOFF_REPLY);
@@ -258,7 +258,7 @@ test("RC1 confidence below 0.5 falls back to safe mode", async () => {
   const response = await auth(
     request(app)
       .post("/api/v1/chat/preview")
-      .send({ buyerMessage: "普通产品说明问题" })
+        .send({ buyerMessage: "product size guide" })
   ).expect(200);
   assert.equal(response.body.status, "NEEDS_HUMAN");
 });

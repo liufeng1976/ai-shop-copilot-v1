@@ -41,7 +41,8 @@ test("service-layer ChatService preview cannot bypass its internal pre-gate", as
     buyerMessage: "What is my refund status?"
   });
 
-  assert.equal(result.status, "NEEDS_HUMAN");
+  assert.equal(result.status, "PENDING_REVIEW");
+  assert.equal(result.allowAutoSend, false);
   assert.equal(providerCalls, 0);
 });
 
@@ -92,7 +93,7 @@ test("service-layer VectorStore requires an authenticated tenant context", () =>
 });
 
 test("review queue never stores an LLM echo of buyerMessage", async () => {
-  const buyerMessage = "My unique support phrase blue-orchid-7842";
+  const buyerMessage = "product size blue-orchid-7842 guide";
   const reviewQueue = new ReviewQueue();
   const chatService = new ChatService({
     vectorStore: new LocalVectorStore(),

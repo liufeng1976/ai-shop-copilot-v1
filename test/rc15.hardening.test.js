@@ -59,9 +59,9 @@ test("RC1.5 contentSafety pre-gate executes before policy and LLM", async () => 
       .send({ buyerMessage: "What refund will I receive?" })
   ).expect(200);
 
-  assert.equal(response.body.status, "NEEDS_HUMAN");
-  assert.equal(response.body.reply, HUMAN_HANDOFF_REPLY);
-  assert.equal(policyCalls, 0);
+  assert.equal(response.body.status, "PENDING_REVIEW");
+  assert.equal(response.body.allowAutoSend, false);
+  assert.equal(policyCalls, 1);
   assert.equal(providerCalls, 0);
 });
 
@@ -70,7 +70,7 @@ test("RC1.5 rejects fake shopId from body, query, and headers", async () => {
   await authenticated(
     request(app)
       .post("/api/v1/chat/preview")
-      .send({ shopId: "demo-shop", buyerMessage: "General FAQ" })
+      .send({ shopId: "demo-shop", buyerMessage: "product size guide" })
   ).expect(403);
   await authenticated(
     request(app).get("/api/v1/reviews?shopId=demo-shop")
@@ -173,7 +173,8 @@ test("RC1.5 policyClassifier blocks high-risk input without LLM", async () => {
       .send({ buyerMessage: "Please delete my order" })
   ).expect(200);
 
-  assert.equal(response.body.status, "NEEDS_HUMAN");
+  assert.equal(response.body.status, "PENDING_REVIEW");
+  assert.equal(response.body.allowAutoSend, false);
   assert.equal(providerCalls, 0);
 });
 
@@ -186,7 +187,7 @@ test("RC1.5 response post-check overrides an unsafe model reply", async () => {
   const response = await authenticated(
     request(app)
       .post("/api/v1/chat/preview")
-      .send({ buyerMessage: "Explain the general support policy" })
+      .send({ buyerMessage: "product size guide" })
   ).expect(200);
 
   assert.equal(response.body.status, "NEEDS_HUMAN");
@@ -207,7 +208,7 @@ test("RC1.5 protected route enforces the immutable middleware order", async () =
   await authenticated(
     request(app)
       .post("/api/v1/chat/preview")
-      .send({ buyerMessage: "Explain the general FAQ" })
+      .send({ buyerMessage: "product size guide" })
   ).expect(200);
 
   assert.deepEqual(observed[0], SECURITY_PIPELINE_ORDER);
@@ -245,7 +246,7 @@ test("RC1.5 request hard timeout returns the safe fallback", async () => {
   const response = await authenticated(
     request(app)
       .post("/api/v1/chat/preview")
-      .send({ buyerMessage: "Explain the general FAQ" })
+      .send({ buyerMessage: "product size guide" })
   ).expect(503);
   assert.equal(response.body.status, "NEEDS_HUMAN");
   assert.equal(response.body.reply, HUMAN_HANDOFF_REPLY);

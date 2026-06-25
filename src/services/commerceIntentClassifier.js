@@ -63,6 +63,9 @@ const INTENT_RULES = Object.freeze([
     intent: INTENTS.PRE_SALE,
     riskLevel: "LOW",
     patterns: [
+      /(?:product|item|goods).*(?:spec|size|fit|compatible|model|color|material|recommend)/i,
+      /(?:size|spec|specification|compatibility|model).*(?:guide|question|choose|fit|recommend)/i,
+      /(?:商品规格|商品尺码|产品规格|产品尺码|规格怎么选|尺码怎么选|怎么选|推荐哪款)/i,
       /(?:商品|产品|宝贝).*(?:咨询|介绍|怎么样|好用吗|适合吗)/i,
       /(?:规格|型号|颜色|材质|成分|参数|功能|适配|兼容)/i,
       /(?:尺码|尺寸|大小|身高|体重|码数|穿多大)/i,

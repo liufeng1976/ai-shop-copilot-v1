@@ -118,7 +118,7 @@ test("RC2 duplicate platformMessageId does not call LLM twice", async () => {
   const payload = {
     platformMessageId: "pm-dup",
     conversationId: "c-dup",
-    messageText: "platform gateway FAQ",
+    messageText: "product size guide",
     senderRole: "buyer"
   };
 
@@ -151,7 +151,7 @@ test("RC2 unapproved review cannot be sent", async () => {
   await request(app)
     .post("/api/v1/chat/preview")
     .set("X-API-Key", API_KEY)
-    .send({ buyerMessage: "platform gateway FAQ" })
+    .send({ buyerMessage: "product size guide" })
     .expect(200);
   const [review] = app.locals.services.reviewQueue.list({ shopId: "demo-shop" });
 
@@ -205,7 +205,7 @@ test("RC2 unconfigured adapter cannot fake send success", async () => {
   await request(app)
     .post("/api/v1/chat/preview")
     .set("X-API-Key", API_KEY)
-    .send({ buyerMessage: "platform gateway FAQ" })
+    .send({ buyerMessage: "product size guide" })
     .expect(200);
   const [review] = app.locals.services.reviewQueue.list({ shopId: "demo-shop" });
   await request(app)

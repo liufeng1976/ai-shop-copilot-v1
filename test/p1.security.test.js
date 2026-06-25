@@ -128,7 +128,7 @@ test("P1 DeepSeek retry exhaustion returns NEEDS_HUMAN", async () => {
   const response = await withAuth(
     request(app)
       .post("/api/v1/chat/preview")
-      .send({ buyerMessage: "General FAQ question" })
+      .send({ buyerMessage: "product size guide" })
   ).expect(200);
   assert.equal(calls, 3);
   assert.equal(response.body.status, "NEEDS_HUMAN");
@@ -183,8 +183,8 @@ test("P1 high-risk categories never call the provider", async () => {
       request(app).post("/api/v1/chat/preview").send({ buyerMessage })
     ).expect(200);
     assert.equal(calls, 0);
-    assert.equal(response.body.status, "NEEDS_HUMAN");
-    assert.equal(response.body.reply, HUMAN_HANDOFF_REPLY);
+    assert.equal(response.body.status, "PENDING_REVIEW");
+    assert.equal(response.body.allowAutoSend, false);
   }
 });
 

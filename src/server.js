@@ -46,6 +46,7 @@ const SECURITY_PIPELINE_ORDER = Object.freeze([
   "tenantResolver",
   "rateLimitMiddleware",
   "contentSafetyPreGate",
+  "commerceIntentClassifier",
   "policyClassifier",
   "vectorStoreRetrieval",
   "deepseekGeneration",

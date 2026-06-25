@@ -63,7 +63,7 @@ async function seedKnowledge(app) {
 async function createSlaViaWebhook(app, {
   receivedAt = new Date("2026-01-01T00:00:00.000Z"),
   platformMessageId = "sla-1",
-  messageText = "SLA buyer text must not persist"
+  messageText = "???? SLA buyer text must not persist ???"
 } = {}) {
   await seedKnowledge(app);
   const response = await signedWebhook(app, {
@@ -99,7 +99,7 @@ test("RC2-B sends fallback at 150 seconds without buyerMessage or LLM", async ()
   };
   const slaId = await createSlaViaWebhook(app, {
     platformMessageId: "sla-fallback",
-    messageText: "private buyer content"
+    messageText: "product size private buyer content guide"
   });
   assert.equal(provider.calls, 1);
 

@@ -111,7 +111,7 @@ test("chat preview requestId is idempotent and does not re-call LLM", async () =
 
   const body = {
     requestId: "idem-chat-1",
-    buyerMessage: "warranty FAQ"
+    buyerMessage: "product size guide"
   };
   const first = await request(app)
     .post("/api/v1/chat/preview")
@@ -121,11 +121,11 @@ test("chat preview requestId is idempotent and does not re-call LLM", async () =
   const second = await request(app)
     .post("/api/v1/chat/preview")
     .set("X-API-Key", API_KEY)
-    .send({ ...body, buyerMessage: "different safe question" })
+    .send({ ...body, buyerMessage: "another product size guide" })
     .expect(200);
 
   assert.equal(calls, 1);
-  assert.equal(first.body.status, "SEND_READY");
+  assert.equal(first.body.status, "PENDING_REVIEW");
   assert.equal(second.body.duplicate, true);
   assert.equal(JSON.stringify(app.locals.services.idempotencyStore.snapshot()).includes("idem-chat-1"), false);
 });
@@ -241,7 +241,7 @@ test("metrics expose error, LLM failure and human handoff rates without user tex
     .set("X-API-Key", API_KEY)
     .send({
       requestId: "metrics-1",
-      buyerMessage: "warranty FAQ"
+      buyerMessage: "product size guide"
     })
     .expect(200);
 

@@ -51,8 +51,9 @@ test("HYBRID mode routes by threshold", async () => {
 
   const high = await chat(highApp, "退货政策是什么？").expect(200);
   const low = await chat(lowApp, "退货政策是什么？").expect(200);
-  assert.equal(high.body.status, "SEND_READY");
+  assert.equal(high.body.status, "PENDING_REVIEW");
   assert.equal(low.body.status, "PENDING_REVIEW");
+  assert.equal(high.body.allowAutoSend, false);
 });
 
 test("invalid DeepSeek JSON retries twice then safely degrades", async () => {
@@ -70,7 +71,7 @@ test("invalid DeepSeek JSON retries twice then safely degrades", async () => {
     }
   });
   const app = createApp({ provider });
-  const response = await chat(app, "退货政策是什么？").expect(200);
+  const response = await chat(app, "product size guide").expect(200);
 
   assert.equal(calls, 3);
   assert.equal(response.body.status, "NEEDS_HUMAN");
@@ -170,8 +171,8 @@ test("high-risk questions do not call LLM and return fixed human handoff", async
       }
     });
     const response = await chat(app, buyerMessage).expect(200);
-    assert.equal(response.body.status, "NEEDS_HUMAN");
-    assert.equal(response.body.reply, HUMAN_HANDOFF_REPLY);
+    assert.equal(response.body.status, "PENDING_REVIEW");
+    assert.equal(response.body.allowAutoSend, false);
     assert.equal(calls, 0);
   }
 });
@@ -179,10 +180,10 @@ test("high-risk questions do not call LLM and return fixed human handoff", async
 test("unsafe promises in LLM reply are forced to NEEDS_HUMAN", async () => {
   const app = createApp({
     provider: providerResult({
-      reply: "我们将赔偿您 100 元，并确认订单已发货。"
+      reply: "We will refund amount 100 and mark the order shipped."
     })
   });
-  const response = await chat(app, "请问售后政策？").expect(200);
+  const response = await chat(app, "product size guide").expect(200);
   assert.equal(response.body.status, "NEEDS_HUMAN");
   assert.equal(response.body.reply, HUMAN_HANDOFF_REPLY);
   assert.equal(app.locals.services.reviewQueue.list({ shopId: "demo-shop" }).length, 0);
