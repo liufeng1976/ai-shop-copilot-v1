@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { DeepSeekProvider } from "./services/deepseek.js";
 import { LocalVectorStore } from "./services/vectorStore.js";
 import { AuditLogger } from "./services/auditLogger.js";
@@ -35,11 +35,17 @@ import { SlaTracker, SLA_STATUSES } from "./services/slaTracker.js";
 import { SlaWatcher } from "./services/slaWatcher.js";
 import { FallbackReplyService } from "./services/fallbackReplyService.js";
 import { EscalationService } from "./services/escalationService.js";
+import { DEMO_SCENARIOS, publicScenario } from "./demo/demoScenarios.js";
 
 const DEFAULT_CORS_ORIGINS = Object.freeze([
   "http://localhost:3000",
   "http://localhost:5173"
 ]);
+
+const DEMO_PAGE_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../public/demo.html"
+);
 
 const SECURITY_PIPELINE_ORDER = Object.freeze([
   "authMiddleware",
@@ -156,6 +162,11 @@ export function createApp({
     response.json({ status: "ok" });
   });
 
+  app.get("/demo", (_request, response) => {
+    response.set("Cache-Control", "no-store");
+    response.sendFile(DEMO_PAGE_PATH);
+  });
+
   const api = express.Router();
   api.use(createAuthMiddleware(authService));
   api.use(createCorsMiddleware(corsOrigins));
@@ -248,6 +259,44 @@ export function createApp({
       }
       pipelineObserver([...request.pipelineTrace]);
       return response.json(result);
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  api.post("/demo/seed", async (request, response, next) => {
+    try {
+      const runId = String(request.body?.runId ?? Date.now())
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .slice(0, 80);
+      const seeded = [];
+      for (const scenario of DEMO_SCENARIOS) {
+        const requestId = `${scenario.requestId}-${runId}`;
+        const result = await chatService.preview({
+          tenantContext: request.tenantContext,
+          buyerMessage: scenario.buyerMessage,
+          requestId,
+          signal: request.abortSignal,
+          pipelineTrace: request.pipelineTrace
+        });
+        metricsService.recordChatResult(result);
+        seeded.push({
+          ...publicScenario({ ...scenario, requestId }),
+          status: result.status,
+          actualIntent: result.intent,
+          riskLevel: result.riskLevel,
+          allowAutoSend: result.allowAutoSend
+        });
+      }
+      return response.json({
+        seeded,
+        summary: reviewQueue.summary({ shopId: request.shopId }),
+        highPriority: reviewQueue.list({
+          shopId: request.shopId,
+          status: "PENDING",
+          priority: "HIGH"
+        })
+      });
     } catch (error) {
       return next(error);
     }

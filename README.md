@@ -347,6 +347,49 @@ curl -s -X POST http://localhost:3000/api/v1/reviews/<review-id>/send \
 3. 第 120-160 秒：查看中优先级的物流/售后草稿，说明 AI 只生成安抚和政策型草稿，不编造物流状态、不承诺退款结果。
 4. 第 160-180 秒：approve 一条 review，再调用 `/send`。展示返回 `MANUAL_DELIVERY_REQUIRED` 和 `sent:false`，强调当前阶段只完成副驾驶闭环，不会自动发送真实抖店/淘宝消息。
 
+## 第六阶段：本地 HTML 演示页
+
+启动服务后访问：
+
+```text
+http://localhost:3000/demo
+```
+
+页面能力：
+
+- 显示服务状态
+- 一键生成 7 类 demo 审核项
+- 展示 `total_pending`、`high_priority_pending`、`medium_priority_pending`、`low_priority_pending`
+- 展示 `pending_by_intent`
+- 展示高优先级审核列表
+- 支持 approve 某条 review
+- 支持 manual send
+- 明确显示 `sent:false` / `MANUAL_DELIVERY_REQUIRED`
+
+页面不会展示模拟买家问题原文、prompt、KB context、raw context、客户姓名、手机号、地址、订单、支付或物流原始信息。
+
+本地页面内置：
+
+```text
+X-API-Key: demo-secret-key
+```
+
+安全边界：
+
+- 仅限本地开发演示
+- 生产环境严禁把 API key 放进页面
+- 生产环境应由服务端会话或安全网关完成鉴权
+- 该页面不接真实抖店 / 淘宝 API
+- 该页面不会自动发送真实平台消息
+
+本地演示话术：
+
+1. 打开 `/demo`，先看系统状态为 `service: ok`。
+2. 点击“一键生成 7 类审核项”，展示 summary 里高、中、低优先级数量。
+3. 指着高优先级列表说明：投诉/差评、禁止承诺、订单敏感问题会被排到前面。
+4. 点击 `Approve`，说明 AI 只是先生成草稿，必须人工审核。
+5. 点击 `Send manual`，展示 `sent:false` 和 `MANUAL_DELIVERY_REQUIRED`，证明没有自动发送真实平台消息。
+
 ## Webhook 签名
 
 平台网关 endpoint：
