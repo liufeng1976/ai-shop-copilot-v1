@@ -32,6 +32,10 @@ import { WebhookSecurity } from "./services/webhookSecurity.js";
 import { OAuthStateStore } from "./services/oauthStateStore.js";
 import { createReplyCommand } from "./domain/replyCommand.js";
 import { createWebhookSignatureMiddleware } from "./middleware/webhookSignature.js";
+import { SlaTracker, SLA_STATUSES } from "./services/slaTracker.js";
+import { SlaWatcher } from "./services/slaWatcher.js";
+import { FallbackReplyService } from "./services/fallbackReplyService.js";
+import { EscalationService } from "./services/escalationService.js";
 
 const DEFAULT_CORS_ORIGINS = Object.freeze([
   "http://localhost:3000",
@@ -109,6 +113,11 @@ export function createApp({
   metricsService = new MetricsService(),
   webhookSecurity = new WebhookSecurity({ database }),
   platformAdapters,
+  slaTracker = new SlaTracker({ database }),
+  escalationService = new EscalationService(),
+  fallbackReplyService,
+  slaWatcher,
+  startSlaWatcher = false,
   rateLimit = createRateLimit(),
   requestTimeout = createRequestTimeout(),
   corsOrigins = parseCorsOrigins(),
@@ -131,6 +140,15 @@ export function createApp({
     taobao: new TaobaoAdapter(),
     amazon: new PlatformAdapter({ platform: "amazon", configured: false })
   };
+  const fallbackService = fallbackReplyService ?? new FallbackReplyService({
+    adapters
+  });
+  const watcher = slaWatcher ?? new SlaWatcher({
+    slaTracker,
+    escalationService,
+    fallbackReplyService: fallbackService
+  });
+  if (startSlaWatcher) watcher.start();
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
@@ -289,6 +307,16 @@ export function createApp({
       if (receipt?.code === "PLATFORM_NOT_CONFIGURED") {
         return platformNotConfigured(response);
       }
+      if (receipt?.ok !== false) {
+        const sla = slaTracker.findByMessage({
+          shopId: request.shopId,
+          platform,
+          platformMessageId: command.platformMessageId
+        });
+        if (sla) {
+          slaTracker.markFirstReply(sla.id, SLA_STATUSES.HUMAN_REPLIED);
+        }
+      }
       return response.json({ command, receipt });
     } catch (error) {
       return next(error);
@@ -349,6 +377,7 @@ export function createApp({
         shopId: request.shopId,
         idempotencyKey: `${platform}:${request.shopId}:${request.body?.platformMessageId}`
       });
+      const sla = slaTracker.createForMessage(normalized);
       const idempotencyKey = normalized.idempotencyKey;
       if (!idempotencyStore.reserve(idempotencyKey)) {
         return response.json({
@@ -356,6 +385,7 @@ export function createApp({
           idempotencyKey
         });
       }
+      slaTracker.updateStatus(sla.id, SLA_STATUSES.AI_PROCESSING);
       const result = await chatService.preview({
         tenantContext: request.tenantContext,
         buyerMessage: normalized.messageText,
@@ -365,10 +395,16 @@ export function createApp({
       });
       metricsService.recordChatResult(result);
       idempotencyStore.complete(idempotencyKey);
+      if (result.status === "AUTO_REPLIED") {
+        slaTracker.markFirstReply(sla.id, SLA_STATUSES.AUTO_REPLIED);
+      } else {
+        slaTracker.updateStatus(sla.id, SLA_STATUSES.PENDING_REVIEW);
+      }
       return response.json({
         duplicate: false,
         platform,
         platformMessageId: normalized.platformMessageId,
+        slaId: sla.id,
         preview: result
       });
     } catch (error) {
@@ -473,6 +509,10 @@ export function createApp({
     oauthStateStore,
     metricsService,
     webhookSecurity,
+    slaTracker,
+    slaWatcher: watcher,
+    fallbackReplyService: fallbackService,
+    escalationService,
     database,
     securityPipelineOrder: SECURITY_PIPELINE_ORDER
   };
@@ -484,7 +524,7 @@ const isMainModule =
 
 if (isMainModule) {
   const port = Number(process.env.PORT ?? 3000);
-  createApp().listen(port, () => {
+  createApp({ startSlaWatcher: true }).listen(port, () => {
     console.log(`AI Shop Copilot RC1 listening on port ${port}`);
   });
 }

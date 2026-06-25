@@ -159,6 +159,46 @@ messageText, senderRole, idempotencyKey
 
 OAuth 目前只实现 state 防 CSRF、state TTL、平台配置检测和统一错误处理。当前不保存 access token 明文；未来如需保存 token，必须使用 `encryptedToken` 字段并配套 key rotation。
 
+## 3分钟平台响应 SLA
+
+RC2-B 增加首次回复 SLA 监控，用来满足平台“买家消息 3 分钟内响应”的要求。
+
+收到平台消息后，系统立即创建一条 SLA 记录，只保存平台元数据：
+
+```text
+id, shop_id, platform, platform_message_id, conversation_id,
+received_at, deadline_at, warn_at, fallback_at,
+first_reply_sent_at, status
+```
+
+不会保存 `buyerMessage`、原始 webhook payload、订单、客户姓名、电话、地址、支付或物流信息。
+
+默认时间线：
+
+- `warn_at = received_at + 90s`
+- `fallback_at = received_at + 150s`
+- `deadline_at = received_at + 180s`
+
+SLA watcher 默认每 10 秒扫描一次：
+
+- 到 90 秒仍未首响：生成脱敏 escalation event
+- 到 150 秒仍未首响：发送固定安全兜底首响
+- 到 180 秒仍未首响：标记 `EXPIRED`
+
+普通兜底话术：
+
+```text
+您好，您的问题已收到，正在为您核实，请稍等。
+```
+
+高风险兜底话术：
+
+```text
+您好，您的问题涉及订单/售后信息，需要人工客服核实后为您处理，请稍等。
+```
+
+兜底回复不调用 LLM，不读取或保存买家原文。若 fallback 已发出，人工审核通过后仍可发送正式补充回复；SLA 的 `first_reply_sent_at` 保留第一次回复时间，不被人工补充回复覆盖。
+
 ## 隐私与安全原则
 
 - `buyerMessage` 只能在当前请求内存中使用

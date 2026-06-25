@@ -54,6 +54,24 @@ export class SqliteDatabase {
         nonce TEXT PRIMARY KEY,
         created_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS sla_records (
+        id TEXT PRIMARY KEY,
+        shop_id TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        platform_message_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        warn_at TEXT NOT NULL,
+        fallback_at TEXT NOT NULL,
+        first_reply_sent_at TEXT,
+        status TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sla_records_message
+        ON sla_records(shop_id, platform, platform_message_id);
+      CREATE INDEX IF NOT EXISTS idx_sla_records_status
+        ON sla_records(status, fallback_at, deadline_at);
     `);
   }
 
