@@ -381,6 +381,7 @@ X-API-Key: demo-secret-key
 - 生产环境应由服务端会话或安全网关完成鉴权
 - 该页面不接真实抖店 / 淘宝 API
 - 该页面不会自动发送真实平台消息
+- `NODE_ENV=production` 时 `/demo` 和 `/api/v1/demo/seed` 会被关闭
 
 本地演示话术：
 
@@ -389,6 +390,24 @@ X-API-Key: demo-secret-key
 3. 指着高优先级列表说明：投诉/差评、禁止承诺、订单敏感问题会被排到前面。
 4. 点击 `Approve`，说明 AI 只是先生成草稿，必须人工审核。
 5. 点击 `Send manual`，展示 `sent:false` 和 `MANUAL_DELIVERY_REQUIRED`，证明没有自动发送真实平台消息。
+
+## 第七阶段：Demo 安全开关
+
+本地 demo 页面和 demo seed API 受环境保护：
+
+```text
+NODE_ENV !== production  -> /demo 和 /api/v1/demo/seed 可用于本地演示
+NODE_ENV = production    -> /demo 和 /api/v1/demo/seed 关闭
+```
+
+生产环境规则：
+
+- 不得部署 `demo-secret-key`
+- 不得把任何 API key 写入前端页面
+- `/demo` 返回 `404`
+- `/api/v1/demo/seed` 返回 `DEMO_DISABLED_IN_PRODUCTION`
+- `/health`、`/api/v1/chat/preview`、`/api/v1/reviews` 等正常 API 不受 demo guard 影响
+- 如需在生产环境演示，必须改为正式鉴权，例如服务端会话、企业 SSO 或安全网关注入身份
 
 ## Webhook 签名
 

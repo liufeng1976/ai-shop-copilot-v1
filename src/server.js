@@ -102,6 +102,13 @@ function webhookRejected(response, code) {
   });
 }
 
+function demoDisabled(response) {
+  return response.status(404).json({
+    error: "Demo is not available",
+    code: "DEMO_DISABLED_IN_PRODUCTION"
+  });
+}
+
 export function createApp({
   database = new SqliteDatabase({
     filename: process.env.SQLITE_PATH ?? ":memory:"
@@ -128,8 +135,10 @@ export function createApp({
   requestTimeout = createRequestTimeout(),
   corsOrigins = parseCorsOrigins(),
   pipelineObserver = () => {},
-  shopConfigs
+  shopConfigs,
+  nodeEnv = process.env.NODE_ENV
 } = {}) {
+  const demoEnabled = nodeEnv !== "production";
   const chatService = new ChatService({
     vectorStore,
     provider,
@@ -163,6 +172,9 @@ export function createApp({
   });
 
   app.get("/demo", (_request, response) => {
+    if (!demoEnabled) {
+      return response.status(404).send("Not Found");
+    }
     response.set("Cache-Control", "no-store");
     response.sendFile(DEMO_PAGE_PATH);
   });
@@ -266,6 +278,9 @@ export function createApp({
 
   api.post("/demo/seed", async (request, response, next) => {
     try {
+      if (!demoEnabled) {
+        return demoDisabled(response);
+      }
       const runId = String(request.body?.runId ?? Date.now())
         .replace(/[^a-zA-Z0-9_-]/g, "-")
         .slice(0, 80);
@@ -575,7 +590,8 @@ export function createApp({
     fallbackReplyService: fallbackService,
     escalationService,
     database,
-    securityPipelineOrder: SECURITY_PIPELINE_ORDER
+    securityPipelineOrder: SECURITY_PIPELINE_ORDER,
+    demoEnabled
   };
   return app;
 }
